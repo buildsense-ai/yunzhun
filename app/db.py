@@ -35,3 +35,10 @@ def init_db() -> None:
             conn.commit()
         except Exception:  # noqa: BLE001  (column already exists)
             pass
+        try:
+            conn.exec_driver_sql(
+                "ALTER TABLE object_refs ADD COLUMN expected_md5 VARCHAR(32)"
+            )
+            conn.commit()
+        except Exception:  # noqa: BLE001
+            pass

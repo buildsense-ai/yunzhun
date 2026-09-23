@@ -163,11 +163,34 @@ def pull_ref(
         if target.exists() and target.stat().st_size > 0:
             continue  # already pulled (idempotent re-runs)
         try:
+            data = bytes(op.read(key))
+            # integrity: md5 when the mail carried one, else size vs remote stat
+            if ref.expected_md5:
+                import hashlib
+
+                digest = hashlib.md5(data).hexdigest()
+                if digest != ref.expected_md5:
+                    failures.append({
+                        "key": key,
+                        "error": f"md5 mismatch: got {digest}, expected {ref.expected_md5}",
+                    })
+                    continue
+            else:
+                try:
+                    meta = op.stat(key)
+                    remote_size = getattr(meta, "content_length", None)
+                    if remote_size is not None and int(remote_size) != len(data):
+                        failures.append({
+                            "key": key,
+                            "error": f"size mismatch: got {len(data)}, remote {remote_size}",
+                        })
+                        continue
+                except (AttributeError, FileNotFoundError):
+                    pass  # stat unsupported on this backend — size check skipped
             target.parent.mkdir(parents=True, exist_ok=True)
             tmp = target.with_name(target.name + ".part")
-            data = bytes(op.read(key))
             tmp.write_bytes(data)
-            tmp.replace(target)  # atomic commit
+            tmp.replace(target)  # atomic commit — only after integrity passes
             pulled.append(PulledFile(path=key, local=str(target), size=len(data)))
         except Exception as e:  # noqa: BLE001 — per-key failure shouldn't abort the ref
             failures.append({"key": key, "error": str(e)})

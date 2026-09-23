@@ -166,6 +166,8 @@ curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: ap
 **进度与可靠性**：
 - `GET /v1/messages/{id}/pulls` 查每个文件的下载记录（remote_key、大小、状态、时间）
 - 原子写入：每个文件先写 `*.part` 再 rename，半截文件永远不会被记为完成
+- **完整性校验**：邮件里带的 MD5 自动提取绑定到 ref，下载后核验；无 MD5 时用远端
+  `stat` 的 size 对账；不匹配记 `failed` 不落盘
 - DB 级去重：重跑自动跳过已下载的 key；文件被删后自愈重下
 - 单文件失败不中断整批，失败原因落库（`status=failed` + `error`）
 - `YUNZHUN_WEBHOOK_URL`：每次自动拉取成功后 POST 通知（best-effort）

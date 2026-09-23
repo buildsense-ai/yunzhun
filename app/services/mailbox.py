@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session as SASession, selectinload
 from ..db import SessionLocal
 from ..mail import imap as imap_client
 from ..mail.imap import ImapAccount, MailError
+from ..mail.checksums import extract_checksums
 from ..mail.parse import decode_header_value, extract_leaf_part, parse_message
 from ..mail.storagelinks import extract_storage_refs
 from ..models import Account, Attachment, Folder, Message, ObjectRef, utcnow
@@ -72,18 +73,25 @@ def ensure_message_body(message_id: int) -> Message:
                     part_index=att["part_index"],
                 )
             )
-        _replace_object_refs(session, msg, extract_storage_refs(parsed["text"], parsed["html"]))
+        _replace_object_refs(
+            session, msg,
+            extract_storage_refs(parsed["text"], parsed["html"]),
+            extract_checksums(parsed["text"], parsed["html"]),
+        )
         session.commit()
         session.refresh(msg)
         return msg
 
 
-def _replace_object_refs(session: SASession, msg: Message, refs) -> None:
+def _replace_object_refs(session: SASession, msg: Message, refs, checksums=None) -> None:
+    if checksums is None:
+        checksums = extract_checksums(msg.text_body, msg.html_body)
     msg.object_refs.clear()
     # flush deletes before inserts: re-inserting the same (message_id, url)
     # would otherwise hit the UNIQUE constraint (UoW orders inserts first).
     session.flush()
     for ref in refs:
+        basename = ref.key.rsplit("/", 1)[-1]
         msg.object_refs.append(
             ObjectRef(
                 account_id=msg.account_id,
@@ -93,6 +101,7 @@ def _replace_object_refs(session: SASession, msg: Message, refs) -> None:
                 region=ref.region,
                 url=ref.url,
                 presigned=ref.presigned,
+                expected_md5=checksums.get(basename),
             )
         )
 
@@ -236,7 +245,11 @@ def ingest_raw_message(raw: bytes, account_address: str = "inbound@webhook.local
                     part_index=att["part_index"],
                 )
             )
-        _replace_object_refs(session, msg, extract_storage_refs(parsed["text"], parsed["html"]))
+        _replace_object_refs(
+            session, msg,
+            extract_storage_refs(parsed["text"], parsed["html"]),
+            extract_checksums(parsed["text"], parsed["html"]),
+        )
         session.commit()
         session.refresh(msg)
         return msg

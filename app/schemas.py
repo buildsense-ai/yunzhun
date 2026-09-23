@@ -77,6 +77,7 @@ class StorageRefOut(BaseModel):
     url: str
     presigned: bool
     source: str = "regex"  # regex | llm
+    expected_md5: str | None = None
 
     model_config = {"from_attributes": True}
 
