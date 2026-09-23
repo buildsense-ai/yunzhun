@@ -70,6 +70,43 @@ curl -X POST :8000/v1/accounts/1/send -H "X-API-Key: $KEY" -H "Content-Type: app
 
 # 9. POP3 备用通道（列最近 N 封摘要）
 curl ":8000/v1/accounts/1/pop3/messages?limit=20" -H "X-API-Key: $KEY"
+
+# 10. 对象存储引用提取（OSS/OBS/COS/S3/GCS/Azure/MinIO）
+curl ":8000/v1/messages/42/objects" -H "X-API-Key: $KEY"
+# → [{"provider":"tencent-cos","bucket":"bkt-1250000000","region":"ap-guangzhou",
+#     "key":"reports/2026/summary.pdf","presigned":true,...}]
+
+# 账号级汇总（按 provider/bucket 过滤，跨所有已读邮件）
+curl ":8000/v1/accounts/1/objects?provider=aliyun-oss" -H "X-API-Key: $KEY"
+
+# 直接拉取公开/预签名对象（SSRF 防护：仅放行可识别的存储域名，≤100MB）
+curl -X POST :8000/v1/objects/fetch -H "X-API-Key: $KEY" \
+  -H "Content-Type: application/json" -d '{"url": "https://...cos.ap-guangzhou.myqcloud.com/a.pdf?sign=..."}'
+```
+
+## 对象存储引用（OSS / OBS / COS）
+
+邮件正文里的云存储链接会在**首次读信时自动提取入库**（`object_refs` 表），解析出
+`provider / bucket / key / region / presigned` 五元组，支持：阿里云 OSS（含 internal endpoint）、
+腾讯云 COS、华为云 OBS（virtual-host + path-style）、AWS S3（含 .cn）、GCS、Azure Blob、
+`s3://` scheme 与 MinIO 预签名 URL。
+
+### 凭据化访问：Apache OpenDAL
+
+提取只解决"找到"；要**读取私有 bucket**，用统一访问层 [Apache OpenDAL](https://opendal.apache.org/) ——
+唯一把 `oss` / `obs` / `cos` 作为一等公民服务的开源方案（Rust 内核，sync+async 双 API，50+ 后端）：
+
+```bash
+pdm install --extra opendal   # 或 pip install opendal
+```
+
+```python
+import opendal  # 提取结果里的 region/bucket/key 直接映射
+op = opendal.Operator("oss", root="/", bucket="bkt-1250000000",
+                      endpoint="https://oss-cn-guangzhou.aliyuncs.com",
+                      access_key_id="...", secret_access_key="...")
+data = op.read("reports/2026/summary.pdf")
+# 同一套代码换 "cos"/"obs"/"s3" 服务名即可，无需改业务逻辑
 ```
 
 ## 配置
@@ -88,10 +125,12 @@ curl ":8000/v1/accounts/1/pop3/messages?limit=20" -H "X-API-Key: $KEY"
 - 正文/附件缓存随用随取，`raw` BLOB 存 SQLite；大体量场景需要加留存上限与压缩
 - 同步轮询而非 IMAP IDLE 长连接；实时推送是下一步（163 对 IDLE 支持有限）
 - API 鉴权为单把静态 Key；多租户时升级为 per-client key + 账号级授权
+- 对象引用提取基于 URL 模式识别（正文 + HTML href）；私有 bucket 下载需配 OpenDAL 凭据层
 
 ## Roadmap
 
 - [ ] IMAP IDLE 实时推送 / Webhook 回调
+- [ ] OpenDAL bucket 凭据注册表 + `/v1/objects/download`（服务端拉取私有对象）
 - [ ] 附件磁盘存储 + CDN 直链，替代 BLOB
 - [ ] 全文检索（SQLite FTS5 → Meilisearch）
 - [ ] 多提供商预设（QQ 企业邮、Outlook、自建）

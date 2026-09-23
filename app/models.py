@@ -104,6 +104,9 @@ class Message(Base):
     attachments: Mapped[list["Attachment"]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
+    object_refs: Mapped[list["ObjectRef"]] = relationship(
+        back_populates="message", cascade="all, delete-orphan"
+    )
 
 
 class Attachment(Base):
@@ -118,3 +121,23 @@ class Attachment(Base):
     part_index: Mapped[int] = mapped_column(Integer)  # leaf-part order for re-extraction
 
     message: Mapped[Message] = relationship(back_populates="attachments")
+
+
+class ObjectRef(Base):
+    """Object-storage reference (OSS/OBS/COS/S3/...) extracted from a message body."""
+
+    __tablename__ = "object_refs"
+    __table_args__ = (UniqueConstraint("message_id", "url"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    bucket: Mapped[str] = mapped_column(String(255))
+    key: Mapped[str] = mapped_column(Text, default="")
+    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    url: Mapped[str] = mapped_column(Text)
+    presigned: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    message: Mapped[Message] = relationship(back_populates="object_refs")

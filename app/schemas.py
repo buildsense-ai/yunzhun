@@ -67,6 +67,19 @@ class AttachmentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class StorageRefOut(BaseModel):
+    id: int
+    message_id: int
+    provider: str
+    bucket: str
+    key: str
+    region: str | None
+    url: str
+    presigned: bool
+
+    model_config = {"from_attributes": True}
+
+
 class MessageListItem(BaseModel):
     id: int
     uid: int
@@ -132,3 +145,8 @@ class SyncResult(BaseModel):
     folders: int
     new_messages: int
     flag_updates: int
+
+
+# ---------- object-storage refs ----------
+class ObjectFetchRequest(BaseModel):
+    url: str = Field(min_length=1, description="object URL previously extracted by the gateway")

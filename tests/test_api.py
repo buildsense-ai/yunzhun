@@ -38,7 +38,7 @@ def test_auth_required(client):
     assert c.get("/v1/accounts").status_code == 401
 
 
-def test_full_flow(client):
+def test_full_flow(client, monkeypatch):
     c, sent = client
 
     # -- account create (verify against fakes) --
@@ -139,6 +139,29 @@ def test_full_flow(client):
     assert r.status_code == 200
     assert sent["subject"] == "Hi"
     assert sent["to"] == ["friend@example.com"]
+
+    # -- safe fetch endpoint --
+    class FakeResp:
+        status_code = 200
+        content = b"PDFDATA"
+        headers = {"Content-Type": "application/pdf", "Content-Length": "7"}
+
+    import httpx as _httpx
+
+    monkeypatch.setattr(_httpx, "request", lambda method, url, **kw: FakeResp())
+    r = c.post(
+        "/v1/objects/fetch",
+        headers=HEADERS,
+        json={"url": "https://bkt-1250000000.cos.ap-guangzhou.myqcloud.com/reports/2026/summary.pdf?sign=x"},
+    )
+    assert r.status_code == 200 and r.content == b"PDFDATA"
+    # unknown host rejected before any network call
+    monkeypatch.setattr(
+        _httpx, "request",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("network call attempted")),
+    )
+    r = c.post("/v1/objects/fetch", headers=HEADERS, json={"url": "https://evil.example.com/secret"})
+    assert r.status_code == 400
 
     # -- pop3 fallback --
     r = c.get(f"/v1/accounts/{account_id}/pop3/messages", headers=HEADERS)

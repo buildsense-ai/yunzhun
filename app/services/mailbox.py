@@ -8,7 +8,8 @@ from ..db import SessionLocal
 from ..mail import imap as imap_client
 from ..mail.imap import ImapAccount, MailError
 from ..mail.parse import decode_header_value, extract_leaf_part, parse_message
-from ..models import Account, Attachment, Message, utcnow
+from ..mail.storagelinks import extract_storage_refs
+from ..models import Account, Attachment, Message, ObjectRef, utcnow
 from ..security import decrypt
 
 LEAF_FLAG_MAP = {
@@ -71,9 +72,40 @@ def ensure_message_body(message_id: int) -> Message:
                     part_index=att["part_index"],
                 )
             )
+        _replace_object_refs(session, msg, extract_storage_refs(parsed["text"], parsed["html"]))
         session.commit()
         session.refresh(msg)
         return msg
+
+
+def _replace_object_refs(session: SASession, msg: Message, refs) -> None:
+    msg.object_refs.clear()
+    for ref in refs:
+        msg.object_refs.append(
+            ObjectRef(
+                account_id=msg.account_id,
+                provider=ref.provider,
+                bucket=ref.bucket,
+                key=ref.key,
+                region=ref.region,
+                url=ref.url,
+                presigned=ref.presigned,
+            )
+        )
+
+
+def scan_message_objects(message_id: int) -> list[ObjectRef]:
+    """(Re-)extract object-storage references from the cached body."""
+    with SessionLocal() as session:
+        msg = _get_message(session, message_id)
+        if not msg.body_fetched:
+            raise LookupError("message body not fetched yet; GET the message first")
+        refs = extract_storage_refs(msg.text_body, msg.html_body)
+        _replace_object_refs(session, msg, refs)
+        session.commit()
+        return session.scalars(
+            select(ObjectRef).where(ObjectRef.message_id == message_id).order_by(ObjectRef.id)
+        ).all()
 
 
 def get_attachment(message_id: int, attachment_id: int) -> tuple[Attachment, bytes]:

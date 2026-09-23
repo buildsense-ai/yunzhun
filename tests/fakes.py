@@ -28,7 +28,10 @@ MSG_2_FULL = (
     b"Content-Type: text/plain; charset=gbk\r\n"
     b"Content-Transfer-Encoding: 8bit\r\n"
     b"\r\n"
-    + "你好，这是一封 GBK 编码的邮件。".encode("gbk")
+    + "你好，这是一封 GBK 编码的邮件。报表下载："
+    "https://bkt-1250000000.cos.ap-guangzhou.myqcloud.com/reports/2026/summary.pdf"
+    "?sign=q-sign-algorithm%3Dsha1&x&数据备份 https://bktdir.oss-cn-hangzhou.aliyuncs.com/db/dump.csv."
+    .encode("gbk")
     + b"\r\n"
     b"--BOUND\r\n"
     b'Content-Type: application/pdf; name="report.pdf"\r\n'
@@ -48,7 +51,8 @@ MSG_3_FULL = (
     b"MIME-Version: 1.0\r\n"
     b"Content-Type: text/html; charset=utf-8\r\n"
     b"\r\n"
-    b"<html><body><h1>Hello</h1><p>World</p></body></html>\r\n"
+    b"<html><body><h1>Hello</h1><p>World</p>"
+    b'<a href="https://obs.cn-north-4.myhuaweicloud.com/logs-bkt/a.log">logs</a></body></html>\r\n'
 )
 
 _MESSAGES = {

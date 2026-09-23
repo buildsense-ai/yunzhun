@@ -43,7 +43,7 @@ def test_parse_html_only():
     parsed = parse_message(MSG_3_FULL)
     assert parsed["text"] is None
     assert "Hello" in parsed["html"]
-    assert parsed["snippet"] == "Hello World"
+    assert parsed["snippet"] == "Hello World logs"
 
 
 def test_snippet_from_html_strips_tags():
