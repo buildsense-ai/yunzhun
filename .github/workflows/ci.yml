@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-and-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pdm install
+
+      - name: Unit + API tests
+        run: pdm run pytest -q
+
+      - name: Extractor eval gate (regression vs baseline)
+        run: pdm run eval --fail-below 0.95
