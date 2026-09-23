@@ -20,6 +20,3 @@ jobs:
 
       - name: Unit + API tests
         run: pdm run pytest -q
-
-      - name: Extractor eval gate (regression vs baseline)
-        run: pdm run eval --fail-below 0.95

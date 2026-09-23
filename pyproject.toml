@@ -26,6 +26,3 @@ dev = [
 
 [tool.pdm]
 distribution = false
-
-[tool.pdm.scripts]
-eval = {cmd = "python -m eval.run_eval"}

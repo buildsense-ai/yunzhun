@@ -119,21 +119,6 @@ data = op.read("reports/2026/summary.pdf")
 | `YUNZHUN_SYNC_INTERVAL_SECONDS` | `120` | 同步周期 |
 | `YUNZHUN_ENCRYPTION_KEY` | 自动生成 `.fernet.key` | Fernet 密钥 |
 
-## 提取器评估（eval harness）
-
-提取器的每次改动都可用金标集客观评估是否更好，避免“人肉 grep 验证”造成的盲区
-（本项目曾因此漏掉 `oss://` scheme 地址）：
-
-```bash
-pdm run eval                     # 跑评估，对比 eval/baseline.json，回归则 exit 1
-pdm run eval --update-baseline   # 改动确认为改进后，更新基线
-pdm run eval --fail-below 0.95   # CI 门禁：F1 低于阈值即失败
-```
-
-金标集 `eval/golden.jsonl` 包含 16 个用例（真实邮件样本 + 合成边界），覆盖
-8 类 provider 的正例、误报负例（GitHub/银行账单/静态资源 URL）、scheme URI、
-path-style、预签名、去重等形态；输出按 provider 分列的 P/R/F1。
-
 ## 设计边界（v1）
 
 - POP3 仅作备用读取通道；同步、标记、删除等主链路基于 IMAP（UID 语义远强于 POP3 UIDL）
