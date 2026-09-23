@@ -80,6 +80,9 @@ def ensure_message_body(message_id: int) -> Message:
 
 def _replace_object_refs(session: SASession, msg: Message, refs) -> None:
     msg.object_refs.clear()
+    # flush deletes before inserts: re-inserting the same (message_id, url)
+    # would otherwise hit the UNIQUE constraint (UoW orders inserts first).
+    session.flush()
     for ref in refs:
         msg.object_refs.append(
             ObjectRef(
