@@ -145,6 +145,26 @@ curl ":8000/v1/accounts/1/judgments?category=delivery&min_storage_delivery=0.5" 
 未配置时接口返回 503。分类维度：`delivery/billing/security/notification/personal/other`
 + 交付概率（Noul）+ 行动紧迫度（Score 0-2）。
 
+### 自动化下载（凭据注册 + 置信门禁 + OpenDAL）
+
+```bash
+pdm install --extra opendal   # Apache OpenDAL（Rust 内核，oss/obs/cos/s3 一等支持）
+
+# 1. 注册 bucket 凭据（Fernet 加密落库，永不回显）
+curl -X POST :8000/v1/stores -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d '{
+  "name": "novo-oss", "provider": "aliyun-oss", "bucket": "novo-china-region",
+  "region": "cn-hangzhou", "access_key_id": "...", "secret_access_key": "..."}'
+
+# 2. 拉取某封交付邮件的全部存储地址（递归目录、上限保护）
+curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"recursive": true, "max_files": 200}'
+# → {"downloaded": ["./downloads/msg-17/..."], "skipped": [...], "gate": {"passed": true}}
+```
+
+**置信门禁**：`category=delivery` 或 `storage_delivery ≥ 0.5` 才允许自动拉取；
+未判定/低置信邮件需要 `force=true`（或先人工看一眼）——这就是“高置信自动、低置信人工”的路由模式。
+目录落到 `YUNZHUN_DOWNLOAD_DIR`（默认 `./downloads/msg-{id}/`）。
+
 ## 设计边界（v1）
 
 - POP3 仅作备用读取通道；同步、标记、删除等主链路基于 IMAP（UID 语义远强于 POP3 UIDL）
@@ -156,7 +176,8 @@ curl ":8000/v1/accounts/1/judgments?category=delivery&min_storage_delivery=0.5" 
 ## Roadmap
 
 - [ ] IMAP IDLE 实时推送 / Webhook 回调
-- [ ] OpenDAL bucket 凭据注册表 + `/v1/objects/download`（服务端拉取私有对象）
+- [ ] 后台自动拉取：同步+判定后自动触发 pull（现在为 API 手动触发）
+- [ ] OpenDAL bucket 凭据注册表已上线；补拉取进度/断点续传
 - [ ] 附件磁盘存储 + CDN 直链，替代 BLOB
 - [ ] 全文检索（SQLite FTS5 → Meilisearch）
 - [ ] 多提供商预设（QQ 企业邮、Outlook、自建）

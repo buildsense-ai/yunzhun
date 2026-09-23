@@ -172,3 +172,40 @@ class JudgmentOut(BaseModel):
     model: str
 
     model_config = {"from_attributes": True}
+
+
+# ---------- stores (bucket credentials) + pulls ----------
+class StoreCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    provider: str  # aliyun-oss | huawei-obs | tencent-cos | aws-s3
+    bucket: str
+    region: str | None = None
+    endpoint: str | None = None
+    access_key_id: str
+    secret_access_key: str
+
+
+class StoreOut(BaseModel):
+    id: int
+    name: str
+    provider: str
+    bucket: str
+    region: str | None
+    endpoint: str | None
+    enabled: bool
+
+    model_config = {"from_attributes": True}
+
+
+class PullRequest(BaseModel):
+    ref_id: int | None = None  # pull a specific storage ref; default = all refs of the message
+    recursive: bool = True  # walk directory prefixes
+    max_files: int = Field(default=200, ge=1, le=2000)
+    force: bool = False  # bypass the Jev confidence gate
+
+
+class PullResult(BaseModel):
+    message_id: int
+    downloaded: list[str]
+    skipped: list[dict]
+    gate: dict

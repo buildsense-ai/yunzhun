@@ -162,3 +162,20 @@ class Judgment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     message: Mapped[Message] = relationship(back_populates="judgment")
+
+
+class Store(Base):
+    """Registered bucket credentials for automated pulls (keys Fernet-encrypted)."""
+
+    __tablename__ = "stores"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True)
+    provider: Mapped[str] = mapped_column(String(40))  # aliyun-oss | huawei-obs | tencent-cos | aws-s3
+    bucket: Mapped[str] = mapped_column(String(255))
+    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    endpoint: Mapped[str | None] = mapped_column(String(255), nullable=True)  # override
+    access_key_enc: Mapped[str] = mapped_column(Text)
+    secret_key_enc: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

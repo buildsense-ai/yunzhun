@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     vercel_gateway_key: str = ""  # AI Gateway key (or AI_GATEWAY_API_KEY env)
     jev_model: str = ""          # override; defaults per provider
 
+    # Automated pulls
+    download_dir: str = "./downloads"
+
 
 @lru_cache
 def get_settings() -> Settings:
