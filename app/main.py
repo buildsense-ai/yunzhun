@@ -59,10 +59,18 @@ async def lifespan(app: FastAPI):
     init_db()
     task = asyncio.create_task(_background_sync())
     pipeline_task = asyncio.create_task(_background_pipeline())
+    idle_mgr = None
+    if settings.idle_enabled:
+        from .services.idle import IdleManager
+
+        idle_mgr = IdleManager()
+        idle_mgr.start()
     log.info("%s started", settings.app_name)
     yield
     task.cancel()
     pipeline_task.cancel()
+    if idle_mgr:
+        idle_mgr.stop()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)

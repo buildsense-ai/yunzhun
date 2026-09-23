@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     # Optional webhook: POSTed after every pipeline pull that downloaded files
     webhook_url: str = ""
 
+    # IMAP IDLE real-time push (falls back to polling when unsupported)
+    idle_enabled: bool = True
+    idle_folder: str = "INBOX"
+    idle_heartbeat_seconds: int = 1500  # re-issue IDLE every 25min (RFC 2177 <29min)
+
 
 @lru_cache
 def get_settings() -> Settings:
