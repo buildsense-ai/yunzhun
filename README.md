@@ -206,16 +206,14 @@ curl -X POST ":8000/v1/pipeline/run" -H "X-API-Key: $KEY"
 
 - POP3 仅作备用读取通道；同步、标记、删除等主链路基于 IMAP（UID 语义远强于 POP3 UIDL）
 - 正文/附件缓存随用随取，`raw` BLOB 存 SQLite；大体量场景需要加留存上限与压缩
-- 同步轮询而非 IMAP IDLE 长连接；实时推送是下一步（163 对 IDLE 支持有限）
+- IMAP IDLE 实时推送已上线（每账号守护线程，不支持时回退轮询）；轮询仍作兑底
 - API 鉴权为单把静态 Key；多租户时升级为 per-client key + 账号级授权
 - 对象引用提取基于 URL 模式识别（正文 + HTML href）；私有 bucket 下载需配 OpenDAL 凭据层
 
 ## Roadmap
 
-- [ ] IMAP IDLE 实时推送
 - [ ] 大文件断点续传（OpenDAL range read）
 - [ ] cloud-drive（pan.*）/ gcs 的自动拉取（非标准对象存储）
-- [ ] OpenDAL bucket 凭据注册表已上线；补拉取进度/断点续传
 - [ ] 附件磁盘存储 + CDN 直链，替代 BLOB
 - [ ] 全文检索（SQLite FTS5 → Meilisearch）
 - [ ] 多提供商预设（QQ 企业邮、Outlook、自建）
