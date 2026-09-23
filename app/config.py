@@ -10,6 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # NetEase servers. All access requires an authorization code (授权码), not the
 # web-login password. IMAP additionally requires the RFC 2971 ID command.
+# qiye163 = 网易企业邮箱/校园邮 (e.g. SYSU student mail @mail2.sysu.edu.cn)
 PROVIDERS: dict[str, dict] = {
     "163": {
         "imap_host": "imap.163.com",
@@ -26,6 +27,15 @@ PROVIDERS: dict[str, dict] = {
         "pop3_host": "pop.126.com",
         "pop3_port": 995,
         "smtp_host": "smtp.126.com",
+        "smtp_port": 465,
+        "requires_id": True,
+    },
+    "qiye163": {
+        "imap_host": "imaphz.qiye.163.com",
+        "imap_port": 993,
+        "pop3_host": "pophz.qiye.163.com",
+        "pop3_port": 995,
+        "smtp_host": "smtphz.qiye.163.com",
         "smtp_port": 465,
         "requires_id": True,
     },

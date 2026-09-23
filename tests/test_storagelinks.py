@@ -67,6 +67,14 @@ def test_s3_scheme_and_minio_presigned():
     assert (m.provider, m.presigned) == ("s3-compatible", True)
 
 
+def test_cloud_drive_share_links():
+    ref = classify("https://pan.sysu.edu.cn/link/AAD59C706CF8C5499880C854A7B76F4E11")
+    assert (ref.provider, ref.bucket, ref.key) == (
+        "cloud-drive", "pan.sysu.edu.cn", "link/AAD59C706CF8C5499880C854A7B76F4E11",
+    )
+    assert classify("https://pan.baidu.com/s/1abcDEF").provider == "cloud-drive"
+
+
 def test_rejects_non_storage_urls():
     assert classify("https://example.com/file.pdf") is None
     assert classify("https://mail.163.com/js/main.js?v=1") is None

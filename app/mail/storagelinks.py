@@ -113,6 +113,10 @@ def classify(url: str) -> StorageRef | None:
     if m:  # container==bucket
         return StorageRef("azure-blob", m["account"] + "/" + _first_path_segment(path), _rest_as_key(path), None, url, presigned)
 
+    # --- cloud-drive share links (pan.baidu.com, pan.sysu.edu.cn, ...) ---
+    if host.startswith("pan."):
+        return StorageRef("cloud-drive", host, unquote(path.lstrip("/")), None, url, presigned)
+
     # --- S3-compatible self-hosted (MinIO etc.): only claim it when signed or explicit s3 markers ---
     if presigned and any(k in parse_qs(query) for k in ("X-Amz-Signature", "Signature", "OSSAccessKeyId")):
         return StorageRef("s3-compatible", _first_path_segment(path), _rest_as_key(path), None, url, presigned)
