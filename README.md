@@ -1,0 +1,98 @@
+# Yunzhun Mail Gateway
+
+邮件基建：上游对接 **163/126 邮箱**（IMAP / POP3 / SMTP + 授权码），下游提供统一 **REST API** 读信、发信、管理附件。
+
+```
+┌────────────┐   IMAP 993 (读)   ┌─────────────────────┐   REST + X-API-Key   ┌──────────┐
+│ 163 / 126  │ ◄────────────────►│  Yunzhun Mail       │ ◄───────────────────► │ 任意前端/ │
+│  NetEase   │   POP3 995 (备)   │  Gateway            │                       │ 服务/脚本 │
+│   服务器   │   SMTP 465 (发)   │  FastAPI + SQLite   │  /v1/...              │          │
+└────────────┘                   └─────────────────────┘                       └──────────┘
+```
+
+## 为什么是网关形态
+
+NetEase 不提供官方 REST API，第三方接入只有 IMAP/POP3/SMTP + 授权码一条路。本服务把协议层封装掉：
+
+- **增量同步引擎**：按 `UIDVALIDITY` + UID 游标增量拉取，标记漂移（网页端已读/标星）定期回刷
+- **懒加载正文**：同步只拉信头，首次 GET 正文时才 `BODY.PEEK[]` 拉全量并缓存入库
+- **授权码加密**：Fernet 加密落库，密钥独立管理，DB 泄露不暴露凭据
+- **NetEase 兼容**：自动处理 163 IMAP 必需的 `ID` 命令（否则报 `Unsafe Login. Please contact kefu@188.com`）；GBK/gb2312 老邮件解析
+
+## 快速开始
+
+```bash
+pdm install
+cp .env.example .env        # 改 YUNZHUN_API_KEY
+pdm run uvicorn app.main:app --port 8000
+# Swagger: http://localhost:8000/docs
+```
+
+### 获取 163 授权码
+
+网页版 163 邮箱 → 设置 → POP3/SMTP/IMAP → 开启服务 → 获取**授权码**（不是登录密码）。
+
+## API 速览
+
+所有请求带 `X-API-Key` 头。
+
+```bash
+# 1. 注册账号（verify=true 会实测 IMAP+SMTP 登录）
+curl -X POST :8000/v1/accounts -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"address": "you@163.com", "auth_code": "你的授权码"}'
+
+# 2. 立即同步（平时由后台定时增量同步）
+curl -X POST :8000/v1/accounts/1/sync -H "X-API-Key: $KEY" -d '{"mode": "incremental"}'
+# mode=full 强制全量重建（UIDVALIDITY 变化时自动触发）
+
+# 3. 文件夹列表（INBOX / 草稿箱 / 已发送 / 垃圾邮件 / 废纸篓…）
+curl :8000/v1/accounts/1/folders -H "X-API-Key: $KEY"
+
+# 4. 读信列表（headers-only，秒回）
+curl ":8000/v1/accounts/1/messages?folder=INBOX&limit=50&unseen_only=false&q=发票" -H "X-API-Key: $KEY"
+
+# 5. 读正文（首次触发懒加载；?mark_seen=true 顺手置已读）
+curl ":8000/v1/messages/42?mark_seen=true" -H "X-API-Key: $KEY"
+
+# 6. 原始 RFC 822 / 附件下载
+curl ":8000/v1/messages/42/raw" -H "X-API-Key: $KEY"
+curl ":8000/v1/messages/42/attachments/7" -H "X-API-Key: $KEY" -o file.pdf
+
+# 7. 标记：已读/未读/标星/删除
+curl -X PATCH :8000/v1/messages/42/flags -H "X-API-Key: $KEY" \
+  -H "Content-Type: application/json" -d '{"add": ["\\Flagged"], "remove": ["\\Seen"]}'
+curl -X DELETE :8000/v1/messages/42 -H "X-API-Key: $KEY"   # IMAP \\Deleted + EXPUNGE
+
+# 8. 发信（含 base64 附件；NetEase SMTP 自动归档到已发送）
+curl -X POST :8000/v1/accounts/1/send -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"to": ["who@example.com"], "subject": "Hi", "text": "hello",
+       "attachments": [{"filename": "a.txt", "content_base64": "aGVsbG8="}]}'
+
+# 9. POP3 备用通道（列最近 N 封摘要）
+curl ":8000/v1/accounts/1/pop3/messages?limit=20" -H "X-API-Key: $KEY"
+```
+
+## 配置
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `YUNZHUN_API_KEY` | `dev-key-change-me` | 网关 API Key |
+| `YUNZHUN_DB_URL` | SQLite | 生产可换 `postgresql://...` |
+| `YUNZHUN_SYNC_ENABLED` | `true` | 后台定时同步开关 |
+| `YUNZHUN_SYNC_INTERVAL_SECONDS` | `120` | 同步周期 |
+| `YUNZHUN_ENCRYPTION_KEY` | 自动生成 `.fernet.key` | Fernet 密钥 |
+
+## 设计边界（v1）
+
+- POP3 仅作备用读取通道；同步、标记、删除等主链路基于 IMAP（UID 语义远强于 POP3 UIDL）
+- 正文/附件缓存随用随取，`raw` BLOB 存 SQLite；大体量场景需要加留存上限与压缩
+- 同步轮询而非 IMAP IDLE 长连接；实时推送是下一步（163 对 IDLE 支持有限）
+- API 鉴权为单把静态 Key；多租户时升级为 per-client key + 账号级授权
+
+## Roadmap
+
+- [ ] IMAP IDLE 实时推送 / Webhook 回调
+- [ ] 附件磁盘存储 + CDN 直链，替代 BLOB
+- [ ] 全文检索（SQLite FTS5 → Meilisearch）
+- [ ] 多提供商预设（QQ 企业邮、Outlook、自建）
+- [ ] 发件箱队列与重试（出站可靠性）
