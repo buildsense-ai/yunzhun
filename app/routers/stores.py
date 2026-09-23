@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from ..db import SessionLocal
 from ..models import Store
-from ..schemas import PullRequest, PullResult, StoreCreate, StoreOut
+from ..schemas import PullRecordOut, PullRequest, PullResult, StoreCreate, StoreOut
 from ..security import encrypt, require_api_key
 from ..services import downloader
 
@@ -57,6 +57,19 @@ def run_pipeline(limit: int = 0) -> dict:
     from ..services.pipeline import process_pending
 
     return process_pending(limit=limit or None)
+
+
+@router.get("/v1/messages/{message_id}/pulls", response_model=list[PullRecordOut])
+def list_pull_records(message_id: int):
+    """Per-file pull history for a message (progress + dedup audit)."""
+    from ..models import PullRecord
+
+    with SessionLocal() as session:
+        return session.scalars(
+            select(PullRecord)
+            .where(PullRecord.message_id == message_id)
+            .order_by(PullRecord.id)
+        ).all()
 
 
 @router.post("/v1/messages/{message_id}/pull", response_model=PullResult)

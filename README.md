@@ -179,6 +179,13 @@ curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: ap
 未判定/低置信邮件需要 `force=true`（或先人工看一眼）——这就是“高置信自动、低置信人工”的路由模式。
 目录落到 `YUNZHUN_DOWNLOAD_DIR`（默认 `./downloads/msg-{id}/`）。
 
+**进度与可靠性**：
+- `GET /v1/messages/{id}/pulls` 查每个文件的下载记录（remote_key、大小、状态、时间）
+- 原子写入：每个文件先写 `*.part` 再 rename，半截文件永远不会被记为完成
+- DB 级去重：重跑自动跳过已下载的 key；文件被删后自愈重下
+- 单文件失败不中断整批，失败原因落库（`status=failed` + `error`）
+- `YUNZHUN_WEBHOOK_URL`：每次自动拉取成功后 POST 通知（best-effort）
+
 ### 全自动流水线（默认开启）
 
 服务启动后，后台每 `YUNZHUN_PIPELINE_INTERVAL_SECONDS`（默认 60s）跑一轮：
@@ -205,8 +212,9 @@ curl -X POST ":8000/v1/pipeline/run" -H "X-API-Key: $KEY"
 
 ## Roadmap
 
-- [ ] IMAP IDLE 实时推送 / Webhook 回调
-- [ ] 拉取进度展示 / 断点续传 / 已下载去重
+- [ ] IMAP IDLE 实时推送
+- [ ] 大文件断点续传（OpenDAL range read）
+- [ ] cloud-drive（pan.*）/ gcs 的自动拉取（非标准对象存储）
 - [ ] OpenDAL bucket 凭据注册表已上线；补拉取进度/断点续传
 - [ ] 附件磁盘存储 + CDN 直链，替代 BLOB
 - [ ] 全文检索（SQLite FTS5 → Meilisearch）

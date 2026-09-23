@@ -25,6 +25,7 @@ SERVICE_MAP = {
     "tencent-cos": "cos",
     "aws-s3": "s3",
     "s3-compatible": "s3",
+    "azure-blob": "azblob",
 }
 
 _UNSAFE_PATH = re.compile(r"(\.\.|^/|[\x00\\])")
@@ -67,6 +68,17 @@ def _operator(store: Store):
     service = SERVICE_MAP.get(store.provider)
     if service is None:
         raise HTTPException(400, f"provider {store.provider!r} is not pullable")
+    if store.provider == "azure-blob":
+        # extractor stores bucket as "account/container"
+        account, _, container = store.bucket.partition("/")
+        return opendal.Operator(
+            "azblob",
+            root="/",
+            container=container,
+            account_name=account,
+            account_key=decrypt(store.secret_key_enc),
+            endpoint=store.endpoint or "",
+        )
     kwargs: dict = {
         "root": "/",
         "bucket": store.bucket,
@@ -114,9 +126,22 @@ def _walk_prefix(op, prefix: str, max_files: int) -> tuple[list[str], bool]:
     return files, truncated
 
 
-def pull_ref(store: Store, ref: ObjectRef, dest: Path, recursive: bool, max_files: int) -> list[PulledFile]:
+def pull_ref(
+    store: Store,
+    ref: ObjectRef,
+    dest: Path,
+    recursive: bool,
+    max_files: int,
+    skip_keys: set[str] | None = None,
+) -> tuple[list[PulledFile], bool, list[dict]]:
+    """Pull one ref. Returns (pulled, truncated, failures).
+
+    Atomic: every object lands via <name>.part -> rename, so a crash mid-write
+    never counts as done. Per-key failures are collected, not raised.
+    """
     op = _operator(store)
     pulled: list[PulledFile] = []
+    failures: list[dict] = []
 
     keys: list[str]
     truncated = False
@@ -128,14 +153,25 @@ def pull_ref(store: Store, ref: ObjectRef, dest: Path, recursive: bool, max_file
         keys = [ref.key]
 
     for key in keys:
-        target = _safe_local_path(dest, key)
+        if skip_keys and key in skip_keys:
+            continue
+        try:
+            target = _safe_local_path(dest, key)
+        except HTTPException as e:
+            failures.append({"key": key, "error": str(e.detail)})
+            continue
         if target.exists() and target.stat().st_size > 0:
             continue  # already pulled (idempotent re-runs)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        data = bytes(op.read(key))
-        target.write_bytes(data)
-        pulled.append(PulledFile(path=key, local=str(target), size=len(data)))
-    return pulled, truncated
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".part")
+            data = bytes(op.read(key))
+            tmp.write_bytes(data)
+            tmp.replace(target)  # atomic commit
+            pulled.append(PulledFile(path=key, local=str(target), size=len(data)))
+        except Exception as e:  # noqa: BLE001 — per-key failure shouldn't abort the ref
+            failures.append({"key": key, "error": str(e)})
+    return pulled, truncated, failures
 
 
 def find_store(session: SASession, provider: str, bucket: str) -> Store | None:
@@ -162,7 +198,7 @@ def pull_message(
     force: bool = False,
 ) -> dict:
     """Core pull flow shared by the API endpoint and the background pipeline."""
-    from ..models import Judgment, Message, ObjectRef
+    from ..models import Judgment, Message, ObjectRef, PullRecord, utcnow
 
     with SessionLocal() as session:
         msg = session.get(Message, message_id)
@@ -203,10 +239,23 @@ def pull_message(
         if not refs:
             raise LookupError(f"no storage refs for message {message_id}")
 
+        # DB-level dedup: keys already pulled for this message (and still on disk)
+        existing_records = {
+            r.remote_key: r
+            for r in session.scalars(
+                select(PullRecord).where(PullRecord.message_id == message_id)
+            ).all()
+        }
+        dest = download_dir() / f"msg-{message_id}"
+        done_keys = {
+            r.remote_key
+            for r in existing_records.values()
+            if r.status == "done" and Path(r.local_path).exists()  # self-heal if file deleted
+        }
+
         stores: dict[tuple[str, str], Store] = {}
         skipped: list[dict] = []
         downloaded: list[str] = []
-        dest = download_dir() / f"msg-{message_id}"
 
         for ref in refs:
             key = (ref.provider, ref.bucket)
@@ -221,15 +270,51 @@ def pull_message(
                 )
                 continue
             try:
-                pulled, truncated = pull_ref(store, ref, dest, recursive, max_files)
-                downloaded.extend(f.local for f in pulled)
-                if truncated:
-                    skipped.append(
-                        {"provider": ref.provider, "bucket": ref.bucket,
-                         "reason": f"prefix listing truncated at {max_files} files"}
-                    )
+                pulled, truncated, failures = pull_ref(
+                    store, ref, dest, recursive, max_files, skip_keys=done_keys
+                )
             except StoreNotFound as e:
                 skipped.append({"provider": ref.provider, "bucket": ref.bucket, "reason": e.detail})
+                continue
+            for f in pulled:
+                downloaded.append(f.local)
+                rec = existing_records.get(f.path)
+                if rec is None:
+                    rec = PullRecord(message_id=message_id, remote_key=f.path)
+                    session.add(rec)
+                rec.object_ref_id = ref.id
+                rec.store_id = store.id
+                rec.provider = ref.provider
+                rec.bucket = ref.bucket
+                rec.local_path = f.local
+                rec.size = f.size
+                rec.status = "done"
+                rec.error = None
+                rec.pulled_at = utcnow()
+            for fail in failures:
+                rec = existing_records.get(fail["key"])
+                if rec is None:
+                    rec = PullRecord(message_id=message_id, remote_key=fail["key"])
+                    session.add(rec)
+                rec.object_ref_id = ref.id
+                rec.store_id = store.id
+                rec.provider = ref.provider
+                rec.bucket = ref.bucket
+                rec.local_path = ""
+                rec.size = 0
+                rec.status = "failed"
+                rec.error = fail["error"][:500]
+                rec.pulled_at = utcnow()
+                skipped.append(
+                    {"provider": ref.provider, "bucket": ref.bucket,
+                     "reason": f"key {fail['key']!r}: {fail['error'][:120]}"}
+                )
+            if truncated:
+                skipped.append(
+                    {"provider": ref.provider, "bucket": ref.bucket,
+                     "reason": f"prefix listing truncated at {max_files} files"}
+                )
+        session.commit()
         return {
             "message_id": message_id,
             "downloaded": downloaded,

@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     llm_model: str = ""  # e.g. "openai/gpt-4.1-mini"; empty = fallback disabled
     llm_api_key: str = ""  # defaults to vercel_gateway_key / AI_GATEWAY_API_KEY
 
+    # Optional webhook: POSTed after every pipeline pull that downloaded files
+    webhook_url: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

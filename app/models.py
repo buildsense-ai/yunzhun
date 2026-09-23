@@ -165,6 +165,26 @@ class Judgment(Base):
     message: Mapped[Message] = relationship(back_populates="judgment")
 
 
+class PullRecord(Base):
+    """One pulled object file — progress display + DB-level dedup."""
+
+    __tablename__ = "pull_records"
+    __table_args__ = (UniqueConstraint("message_id", "remote_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id"), index=True)
+    object_ref_id: Mapped[int | None] = mapped_column(ForeignKey("object_refs.id"), nullable=True)
+    store_id: Mapped[int | None] = mapped_column(ForeignKey("stores.id"), nullable=True)
+    provider: Mapped[str] = mapped_column(String(40))
+    bucket: Mapped[str] = mapped_column(String(255))
+    remote_key: Mapped[str] = mapped_column(Text)
+    local_path: Mapped[str] = mapped_column(Text)
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="done")  # done | failed
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pulled_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Store(Base):
     """Registered bucket credentials for automated pulls (keys Fernet-encrypted)."""
 

@@ -210,3 +210,18 @@ class PullResult(BaseModel):
     downloaded: list[str]
     skipped: list[dict]
     gate: dict
+
+
+class PullRecordOut(BaseModel):
+    id: int
+    message_id: int
+    provider: str
+    bucket: str
+    remote_key: str
+    local_path: str
+    size: int
+    status: str  # done | failed
+    error: str | None
+    pulled_at: datetime
+
+    model_config = {"from_attributes": True}

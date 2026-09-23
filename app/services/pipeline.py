@@ -72,6 +72,7 @@ def process_pending(limit: int | None = None, recursive: bool = True) -> dict:
                 if result["downloaded"]:
                     log.info("pipeline pulled %d file(s) for message %d",
                              len(result["downloaded"]), mid)
+                    _notify(mid, result)
         except HTTPException as e:
             # upstream transient failures (rate limit / gateway): stop this round
             if e.status_code in (429, 502, 503):
@@ -88,3 +89,25 @@ def process_pending(limit: int | None = None, recursive: bool = True) -> dict:
             stats["errors"] += 1
         time.sleep(0.3)  # be gentle with free-tier rate limits
     return stats
+
+
+def _notify(message_id: int, result: dict) -> None:
+    """Best-effort webhook after a successful auto-pull."""
+    url = get_settings().webhook_url
+    if not url:
+        return
+    try:
+        import httpx
+
+        httpx.post(
+            url,
+            json={
+                "event": "pull.completed",
+                "message_id": message_id,
+                "downloaded": result["downloaded"],
+                "skipped": result["skipped"],
+            },
+            timeout=10.0,
+        )
+    except Exception:  # noqa: BLE001 — notification must never break the pipeline
+        log.warning("webhook POST failed for message %s", message_id)
