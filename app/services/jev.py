@@ -140,15 +140,18 @@ def judge_message(message_id: int) -> Judgment:
         category = answers.get("category", {})
         noul = answers.get("storage_delivery", {})
         score = answers.get("action_required", {})
-        judgment = Judgment(
-            message_id=message_id,
-            category=category.get("choice", "other"),
-            category_confidence=float(category.get("confidence") or 0.0),
-            storage_delivery=float(noul.get("noul") or 0.0),
-            action_required=int(round(float(score.get("score") or 0.0))),
-            model=data.get("model", model),
-            raw=data,
+        judgment = session.scalar(
+            select(Judgment).where(Judgment.message_id == message_id)
         )
+        if judgment is None:  # create; updating in place avoids UoW delete/insert ordering
+            judgment = Judgment(message_id=message_id)
+            session.add(judgment)
+        judgment.category = category.get("choice", "other")
+        judgment.category_confidence = float(category.get("confidence") or 0.0)
+        judgment.storage_delivery = float(noul.get("noul") or 0.0)
+        judgment.action_required = int(round(float(score.get("score") or 0.0)))
+        judgment.model = data.get("model", model)
+        judgment.raw = data
         msg.judgment = judgment
         session.commit()
         return session.scalars(
