@@ -1,4 +1,4 @@
-"""Jev judgment layer tests (fake upstream)."""
+"""Jev judgment layer tests (fake upstream, both providers)."""
 from __future__ import annotations
 
 import pytest
@@ -11,8 +11,18 @@ from tests.fakes import FakeImap
 
 HEADERS = {"X-API-Key": "test-key"}
 
+
+def _stub_settings(monkeypatch, **kw):
+    from types import SimpleNamespace
+
+    base = dict(jev_provider="vercel", vercel_gateway_key="", jev_api_key="", jev_model="")
+    base.update(kw)
+    stub = SimpleNamespace(**base)
+    monkeypatch.setattr(jev_service, "get_settings", lambda: stub)
+
+
 JEV_RESPONSE = {
-    "model": "jev-1.13.0",
+    "model": "jev-test-model",
     "answers": {
         "category": {
             "type": "choice",
@@ -32,20 +42,69 @@ JEV_RESPONSE = {
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setattr(imap_client, "connect", lambda acct: FakeImap())
-    monkeypatch.setattr(jev_service, "_api_key", lambda: "fake-key")
     calls: list[dict] = []
 
-    def fake_post(payload, api_key):
-        calls.append(payload)
+    def fake_post(url, payload, api_key):
+        calls.append({"url": url, "payload": payload, "api_key": api_key})
         return JEV_RESPONSE
 
     monkeypatch.setattr(jev_service, "_post", fake_post)
+    monkeypatch.setattr(
+        jev_service, "resolve_provider",
+        lambda: ("https://ai-gateway.vercel.sh/typesafe/v1/systemone",
+                 "typesafe-ai/jev", "fake-gw-key"),
+    )
     with TestClient(app) as c:
         yield c, calls
 
 
+def _make_account_with_message(c):
+    r = c.post(
+        "/v1/accounts",
+        headers=HEADERS,
+        json={"address": "jev-test@163.com", "auth_code": "AUTHCODE123", "verify": False},
+    )
+    if r.status_code == 409:  # account persisted from a previous test in shared DB
+        account_id = int(r.json()["detail"].rsplit("=", 1)[-1].rstrip(")"))
+    else:
+        account_id = r.json()["id"]
+    c.post(f"/v1/accounts/{account_id}/sync", headers=HEADERS, json={})
+    items = c.get(
+        f"/v1/accounts/{account_id}/messages", headers=HEADERS, params={"folder": "INBOX"}
+    ).json()
+    return account_id, items
+
+
+def test_resolve_provider_vercel(monkeypatch):
+    _stub_settings(monkeypatch, jev_provider="vercel")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "gw-key-123")
+    url, model, key = jev_service.resolve_provider()
+    assert url == "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
+    assert model == "typesafe-ai/jev"
+    assert key == "gw-key-123"
+
+
+def test_resolve_provider_typesafe(monkeypatch):
+    _stub_settings(monkeypatch, jev_provider="typesafe")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-key-456")
+    url, model, key = jev_service.resolve_provider()
+    assert url == "https://api.typesafe.ai/v1/systemone"
+    assert model == "jev-latest"
+    assert key == "ts-key-456"
+
+
+def test_resolve_provider_no_key(monkeypatch):
+    _stub_settings(monkeypatch, jev_provider="vercel")
+    for e in ("AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY", "YUNZHUN_VERCEL_GATEWAY_KEY"):
+        monkeypatch.delenv(e, raising=False)
+    with pytest.raises(jev_service.JevUnavailable):
+        jev_service.resolve_provider()
+
+
 def test_judge_requires_config(monkeypatch):
-    monkeypatch.setattr(jev_service, "_api_key", lambda: "")
+    def raise_unavailable():
+        raise jev_service.JevUnavailable("Jev provider 'vercel' is not configured")
+    monkeypatch.setattr(jev_service, "resolve_provider", raise_unavailable)
     with TestClient(app) as c:
         r = c.post("/v1/messages/999/judge", headers=HEADERS)
         assert r.status_code == 503
@@ -54,17 +113,7 @@ def test_judge_requires_config(monkeypatch):
 
 def test_judge_flow(client):
     c, calls = client
-
-    r = c.post(
-        "/v1/accounts",
-        headers=HEADERS,
-        json={"address": "jev-test@163.com", "auth_code": "AUTHCODE123", "verify": False},
-    )
-    account_id = r.json()["id"]
-    c.post(f"/v1/accounts/{account_id}/sync", headers=HEADERS, json={})
-    items = c.get(
-        f"/v1/accounts/{account_id}/messages", headers=HEADERS, params={"folder": "INBOX"}
-    ).json()
+    account_id, items = _make_account_with_message(c)
     msg2_id = items[1]["id"]
     c.get(f"/v1/messages/{msg2_id}", headers=HEADERS)  # trigger lazy body fetch
 
@@ -76,14 +125,20 @@ def test_judge_flow(client):
     assert body["category_confidence"] == pytest.approx(0.92)
     assert body["storage_delivery"] == pytest.approx(0.97)
     assert body["action_required"] == 1
-    assert body["model"] == "jev-1.13.0"
+    assert body["model"] == "jev-test-model"
+
+    # routed to the Vercel-compatible endpoint with provider model + key
+    assert calls[0]["url"] == "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
+    assert calls[0]["payload"]["model"] == "typesafe-ai/jev"
+    assert calls[0]["api_key"] == "fake-gw-key"
 
     # state sent upstream contains subject and storage refs
-    state = calls[0]["state"]
+    state = calls[0]["payload"]["state"]
     assert "Report" in state
     assert "aliyun-oss://bktdir/db/dump.csv" in state
-    q = calls[0]["questions"]
-    assert set(q) == {"category", "storage_delivery", "action_required"}
+    assert set(calls[0]["payload"]["questions"]) == {
+        "category", "storage_delivery", "action_required",
+    }
 
     # stored judgment retrievable
     r = c.get(f"/v1/messages/{msg2_id}/judge", headers=HEADERS)
@@ -107,16 +162,7 @@ def test_judge_flow(client):
 
 def test_judge_unfetched_message_409(client):
     c, _ = client
-    r = c.post(
-        "/v1/accounts",
-        headers=HEADERS,
-        json={"address": "jev-b@163.com", "auth_code": "AUTHCODE123", "verify": False},
-    )
-    account_id = r.json()["id"]
-    c.post(f"/v1/accounts/{account_id}/sync", headers=HEADERS, json={})
-    items = c.get(
-        f"/v1/accounts/{account_id}/messages", headers=HEADERS, params={"folder": "INBOX"}
-    ).json()
+    account_id, items = _make_account_with_message(c)
     untouched = next(m["id"] for m in items if m["uid"] == 3)  # body never fetched
     r = c.post(f"/v1/messages/{untouched}/judge", headers=HEADERS)
     assert r.status_code == 409

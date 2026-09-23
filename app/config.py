@@ -54,9 +54,13 @@ class Settings(BaseSettings):
     sync_interval_seconds: int = 120
     flag_refresh_window: int = 200
 
-    # Jev (TypeSafe System One) semantic judgment layer; empty key = feature off
-    jev_api_key: str = ""
-    jev_model: str = "jev-latest"
+    # Jev (TypeSafe System One) semantic judgment layer.
+    # provider "vercel" routes through Vercel AI Gateway (free tier, model typesafe-ai/jev);
+    # "typesafe" calls api.typesafe.ai directly (jev-latest).
+    jev_provider: str = "vercel"
+    jev_api_key: str = ""       # TypeSafe direct key (or TYPESAFE_API_KEY env)
+    vercel_gateway_key: str = ""  # AI Gateway key (or AI_GATEWAY_API_KEY env)
+    jev_model: str = ""          # override; defaults per provider
 
 
 @lru_cache

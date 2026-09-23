@@ -7,6 +7,9 @@ One batched call per message asks parallel atomic questions:
 
 The deterministic regex extractor (storagelinks.py) stays the source of truth
 for *what* the storage addresses are; Jev adds the semantic *so-what*.
+
+API contract is identical across providers (TypeSafe-compatible); only base URL,
+model slug and credentials differ.
 """
 from __future__ import annotations
 
@@ -22,9 +25,21 @@ from ..config import get_settings
 from ..db import SessionLocal
 from ..models import Judgment, Message
 
-API_URL = "https://api.typesafe.ai/v1/systemone"
 _TIMEOUT = 20.0
 _STATE_CHAR_LIMIT = 4000
+
+PROVIDERS: dict[str, dict] = {
+    "vercel": {  # Vercel AI Gateway — free tier
+        "api_url": "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
+        "model": "typesafe-ai/jev",
+        "key_env": ("YUNZHUN_VERCEL_GATEWAY_KEY", "AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"),
+    },
+    "typesafe": {  # TypeSafe direct
+        "api_url": "https://api.typesafe.ai/v1/systemone",
+        "model": "jev-latest",
+        "key_env": ("YUNZHUN_JEV_API_KEY", "TYPESAFE_API_KEY"),
+    },
+}
 
 CATEGORIES: dict[str, str] = {
     "delivery": "数据/文件交付（测序数据、报表、样品数据等，含下载地址或交付位置）",
@@ -43,13 +58,25 @@ class JevUnavailable(HTTPException):
         super().__init__(503, detail)
 
 
-def _api_key() -> str:
-    return get_settings().jev_api_key or os.environ.get("TYPESAFE_API_KEY", "")
+def resolve_provider() -> tuple[str, str, str]:
+    """Resolve (api_url, model, api_key) for the configured provider."""
+    settings = get_settings()
+    provider = settings.jev_provider if settings.jev_provider in PROVIDERS else "vercel"
+    cfg = PROVIDERS[provider]
+    key = settings.vercel_gateway_key if provider == "vercel" else settings.jev_api_key
+    key = key or next((os.environ[e] for e in cfg["key_env"] if os.environ.get(e)), "")
+    if not key:
+        missing = ", ".join(cfg["key_env"])
+        raise JevUnavailable(
+            f"Jev provider {provider!r} is not configured; set one of: {missing}"
+        )
+    model = settings.jev_model or cfg["model"]
+    return cfg["api_url"], model, key
 
 
-def _post(payload: dict, api_key: str) -> dict:
+def _post(url: str, payload: dict, api_key: str) -> dict:
     resp = httpx.post(
-        API_URL,
+        url,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         json=payload,
         timeout=_TIMEOUT,
@@ -72,12 +99,7 @@ def _build_state(msg: Message, refs: list[str]) -> str:
 
 
 def judge_message(message_id: int) -> Judgment:
-    settings = get_settings()
-    api_key = _api_key()
-    if not api_key:
-        raise JevUnavailable(
-            "Jev is not configured: set YUNZHUN_JEV_API_KEY (or TYPESAFE_API_KEY)"
-        )
+    api_url, model, api_key = resolve_provider()
 
     with SessionLocal() as session:
         msg = session.get(Message, message_id, options=(selectinload(Message.object_refs),))
@@ -91,7 +113,7 @@ def judge_message(message_id: int) -> Judgment:
         state = _build_state(msg, refs)
 
     payload = {
-        "model": settings.jev_model,
+        "model": model,
         "state": state,
         "questions": {
             "category": {
@@ -110,7 +132,7 @@ def judge_message(message_id: int) -> Judgment:
             },
         },
     }
-    data = _post(payload, api_key)
+    data = _post(api_url, payload, api_key)
     answers: dict[str, Any] = data.get("answers", {})
 
     with SessionLocal() as session:
@@ -124,7 +146,7 @@ def judge_message(message_id: int) -> Judgment:
             category_confidence=float(category.get("confidence") or 0.0),
             storage_delivery=float(noul.get("noul") or 0.0),
             action_required=int(round(float(score.get("score") or 0.0))),
-            model=data.get("model", settings.jev_model),
+            model=data.get("model", model),
             raw=data,
         )
         msg.judgment = judgment
