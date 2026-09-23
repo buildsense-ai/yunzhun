@@ -179,6 +179,22 @@ curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: ap
 未判定/低置信邮件需要 `force=true`（或先人工看一眼）——这就是“高置信自动、低置信人工”的路由模式。
 目录落到 `YUNZHUN_DOWNLOAD_DIR`（默认 `./downloads/msg-{id}/`）。
 
+### 全自动流水线（默认开启）
+
+服务启动后，后台每 `YUNZHUN_PIPELINE_INTERVAL_SECONDS`（默认 60s）跑一轮：
+
+```
+新邮件 → 同步入库(后台) → 拉正文 → Jev 判定 → [delivery 且 ≥0.5] → OpenDAL 自动下载
+                                                ↘ 未注册凭据的 bucket → skipped 带原因
+```
+
+开关与参数：`YUNZHUN_PIPELINE_ENABLED=true`、`YUNZHUN_PIPELINE_INTERVAL_SECONDS=60`、
+`YUNZHUN_PIPELINE_BATCH_LIMIT=20`（每轮最多处理条数，防免费层限流）。手动触发单轮：
+
+```bash
+curl -X POST ":8000/v1/pipeline/run" -H "X-API-Key: $KEY"
+```
+
 ## 设计边界（v1）
 
 - POP3 仅作备用读取通道；同步、标记、删除等主链路基于 IMAP（UID 语义远强于 POP3 UIDL）
@@ -190,7 +206,7 @@ curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: ap
 ## Roadmap
 
 - [ ] IMAP IDLE 实时推送 / Webhook 回调
-- [ ] 后台自动拉取：同步+判定后自动触发 pull（现在为 API 手动触发）
+- [ ] 拉取进度展示 / 断点续传 / 已下载去重
 - [ ] OpenDAL bucket 凭据注册表已上线；补拉取进度/断点续传
 - [ ] 附件磁盘存储 + CDN 直链，替代 BLOB
 - [ ] 全文检索（SQLite FTS5 → Meilisearch）

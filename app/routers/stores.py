@@ -5,11 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from ..db import SessionLocal
-from ..models import Judgment, Message, ObjectRef, Store
+from ..models import Store
 from ..schemas import PullRequest, PullResult, StoreCreate, StoreOut
 from ..security import encrypt, require_api_key
 from ..services import downloader
-from ..services.downloader import StoreNotFound, download_dir, pull_ref
 
 router = APIRouter(tags=["stores", "pulls"], dependencies=[Depends(require_api_key)])
 
@@ -52,6 +51,14 @@ def delete_store(store_id: int) -> None:
         session.commit()
 
 
+@router.post("/v1/pipeline/run")
+def run_pipeline(limit: int = 0) -> dict:
+    """Trigger one pipeline round manually (fetch -> judge -> gated pull)."""
+    from ..services.pipeline import process_pending
+
+    return process_pending(limit=limit or None)
+
+
 @router.post("/v1/messages/{message_id}/pull", response_model=PullResult)
 def pull_message_attachments(message_id: int, body: PullRequest) -> PullResult:
     """Download the storage refs of a delivery mail via registered bucket credentials.
@@ -59,61 +66,11 @@ def pull_message_attachments(message_id: int, body: PullRequest) -> PullResult:
     Jev gate: allowed when the message was judged category=delivery or
     storage_delivery >= 0.5; otherwise pass force=true explicitly.
     """
-    with SessionLocal() as session:
-        msg = session.get(Message, message_id)
-        if msg is None:
-            raise LookupError(f"message {message_id} not found")
-
-        judgment = session.scalar(select(Judgment).where(Judgment.message_id == message_id))
-        gate = {
-            "category": judgment.category if judgment else None,
-            "storage_delivery": judgment.storage_delivery if judgment else None,
-            "passed": False,
-            "forced": body.force,
-        }
-        if not body.force:
-            if judgment is None:
-                gate["reason"] = "no judgment yet; run /judge first or pass force=true"
-            elif judgment.category == "delivery" or judgment.storage_delivery >= 0.5:
-                gate["passed"] = True
-            else:
-                gate["reason"] = (
-                    f"judged {judgment.category!r} with storage_delivery="
-                    f"{judgment.storage_delivery:.2f}; pass force=true to override"
-                )
-        else:
-            gate["passed"] = True
-
-        if not gate["passed"]:
-            raise HTTPException(403, {"gate": gate})
-
-        stmt = select(ObjectRef).where(ObjectRef.message_id == message_id)
-        if body.ref_id:
-            stmt = stmt.where(ObjectRef.id == body.ref_id)
-        refs = session.scalars(stmt.order_by(ObjectRef.id)).all()
-        if not refs:
-            raise LookupError(f"no storage refs for message {message_id}")
-
-        stores: dict[tuple[str, str], Store] = {}
-        skipped: list[dict] = []
-        downloaded: list[str] = []
-        dest = download_dir() / f"msg-{message_id}"
-
-        for ref in refs:
-            key = (ref.provider, ref.bucket)
-            store = stores.get(key)
-            if store is None:
-                store = downloader.find_store(session, ref.provider, ref.bucket)
-                stores[key] = store
-            if store is None:
-                skipped.append(
-                    {"provider": ref.provider, "bucket": ref.bucket,
-                     "reason": "no registered store with credentials for this bucket"}
-                )
-                continue
-            try:
-                for f in pull_ref(store, ref, dest, body.recursive, body.max_files):
-                    downloaded.append(f.local)
-            except StoreNotFound as e:  # endpoint/region misconfig
-                skipped.append({"provider": ref.provider, "bucket": ref.bucket, "reason": e.detail})
-        return PullResult(message_id=message_id, downloaded=downloaded, skipped=skipped, gate=gate)
+    result = downloader.pull_message(
+        message_id,
+        ref_id=body.ref_id,
+        recursive=body.recursive,
+        max_files=body.max_files,
+        force=body.force,
+    )
+    return PullResult(**result)

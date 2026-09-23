@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     # Automated pulls
     download_dir: str = "./downloads"
 
+    # Full pipeline (fetch body -> judge -> gated pull) running in background
+    pipeline_enabled: bool = True
+    pipeline_interval_seconds: int = 60
+    pipeline_batch_limit: int = 20
+
     # LLM fallback extraction: runs only when Jev flags delivery-ish AND regex
     # found nothing. Route through the Vercel AI Gateway (OpenAI-compatible).
     llm_model: str = ""  # e.g. "openai/gpt-4.1-mini"; empty = fallback disabled

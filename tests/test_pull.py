@@ -44,8 +44,7 @@ class FakeOperator:
 def client(monkeypatch, tmp_path):
     monkeypatch.setattr(imap_client, "connect", lambda acct: FakeImap())
     monkeypatch.setattr(downloader, "_operator", lambda store: FakeOperator(**{"bucket": store.bucket}))
-    from app.routers import stores as stores_router
-    monkeypatch.setattr(stores_router, "download_dir", lambda: tmp_path / "dl")
+    monkeypatch.setattr(downloader, "download_dir", lambda: tmp_path / "dl")
     with TestClient(app) as c:
         yield c
 
@@ -87,7 +86,8 @@ def test_store_crud_masks_keys(client):
     assert "access_key" not in body and "secret" not in body  # never echoed
 
     listed = client.get("/v1/stores", headers=HEADERS).json()
-    assert listed[0]["name"] == "novo-oss"
+    assert any(s["name"] == "novo-oss" for s in listed)
+    assert all("access_key" not in s and "secret" not in s for s in listed)  # never echoed
 
 
 def test_pull_requires_registered_store(client):

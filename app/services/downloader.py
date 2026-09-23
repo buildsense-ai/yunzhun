@@ -14,8 +14,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session as SASession
 
-from ..config import get_settings
-from ..models import ObjectRef, Store
+from ..db import SessionLocal
+from ..models import Store
 from ..security import decrypt
 
 # provider -> OpenDAL service name
@@ -134,6 +134,87 @@ def find_store(session: SASession, provider: str, bucket: str) -> Store | None:
 
 
 def download_dir() -> Path:
+    from ..config import get_settings
+
     d = Path(get_settings().download_dir)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def pull_message(
+    message_id: int,
+    ref_id: int | None = None,
+    recursive: bool = True,
+    max_files: int = 200,
+    force: bool = False,
+) -> dict:
+    """Core pull flow shared by the API endpoint and the background pipeline."""
+    from ..models import Judgment, Message, ObjectRef
+
+    with SessionLocal() as session:
+        msg = session.get(Message, message_id)
+        if msg is None:
+            raise LookupError(f"message {message_id} not found")
+
+        judgment = session.scalar(
+            select(Judgment).where(Judgment.message_id == message_id)
+        )
+        gate = {
+            "category": judgment.category if judgment else None,
+            "storage_delivery": judgment.storage_delivery if judgment else None,
+            "passed": False,
+            "forced": force,
+        }
+        if not force:
+            if judgment is None:
+                gate["reason"] = "no judgment yet; run /judge first or pass force=true"
+            elif judgment.category == "delivery" or judgment.storage_delivery >= 0.5:
+                gate["passed"] = True
+            else:
+                gate["reason"] = (
+                    f"judged {judgment.category!r} with storage_delivery="
+                    f"{judgment.storage_delivery:.2f}; pass force=true to override"
+                )
+        else:
+            gate["passed"] = True
+
+        if not gate["passed"]:
+            from fastapi import HTTPException
+
+            raise HTTPException(403, {"gate": gate})
+
+        stmt = select(ObjectRef).where(ObjectRef.message_id == message_id)
+        if ref_id:
+            stmt = stmt.where(ObjectRef.id == ref_id)
+        refs = session.scalars(stmt.order_by(ObjectRef.id)).all()
+        if not refs:
+            raise LookupError(f"no storage refs for message {message_id}")
+
+        stores: dict[tuple[str, str], Store] = {}
+        skipped: list[dict] = []
+        downloaded: list[str] = []
+        dest = download_dir() / f"msg-{message_id}"
+
+        for ref in refs:
+            key = (ref.provider, ref.bucket)
+            store = stores.get(key)
+            if store is None:
+                store = find_store(session, ref.provider, ref.bucket)
+                stores[key] = store
+            if store is None:
+                skipped.append(
+                    {"provider": ref.provider, "bucket": ref.bucket,
+                     "reason": "no registered store with credentials for this bucket"}
+                )
+                continue
+            try:
+                for f in pull_ref(store, ref, dest, recursive, max_files):
+                    downloaded.append(f.local)
+            except StoreNotFound as e:
+                skipped.append({"provider": ref.provider, "bucket": ref.bucket, "reason": e.detail})
+        return {
+            "message_id": message_id,
+            "downloaded": downloaded,
+            "skipped": skipped,
+            "gate": gate,
+        }

@@ -36,13 +36,33 @@ async def _background_sync() -> None:
         await asyncio.sleep(settings.sync_interval_seconds)
 
 
+async def _background_pipeline() -> None:
+    """Fetch body -> Jev judge -> confidence-gated pull, for every pending mail."""
+    if not settings.pipeline_enabled:
+        log.info("background pipeline disabled")
+        return
+    from .services.pipeline import process_pending
+
+    await asyncio.sleep(5)
+    while True:
+        try:
+            stats = await asyncio.to_thread(process_pending)
+            if stats.get("pending") or stats.get("pulled"):
+                log.info("pipeline round: %s", stats)
+        except Exception:  # noqa: BLE001
+            log.exception("background pipeline round failed")
+        await asyncio.sleep(settings.pipeline_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     task = asyncio.create_task(_background_sync())
+    pipeline_task = asyncio.create_task(_background_pipeline())
     log.info("%s started", settings.app_name)
     yield
     task.cancel()
+    pipeline_task.cancel()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
