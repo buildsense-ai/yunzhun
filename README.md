@@ -96,9 +96,7 @@ curl -X POST :8000/v1/objects/fetch -H "X-API-Key: $KEY" \
 提取只解决"找到"；要**读取私有 bucket**，用统一访问层 [Apache OpenDAL](https://opendal.apache.org/) ——
 唯一把 `oss` / `obs` / `cos` 作为一等公民服务的开源方案（Rust 内核，sync+async 双 API，50+ 后端）：
 
-```bash
-pdm install --extra opendal   # 或 pip install opendal
-```
+OpenDAL 已是一等依赖（`pdm install` 自带），提取结果里的 region/bucket/key 直接映射：
 
 ```python
 import opendal  # 提取结果里的 region/bucket/key 直接映射
@@ -150,8 +148,6 @@ curl ":8000/v1/accounts/1/judgments?category=delivery&min_storage_delivery=0.5" 
 ## 自动化下载（凭据注册 + 置信门禁 + OpenDAL）
 
 ```bash
-pdm install --extra opendal   # Apache OpenDAL（Rust 内核，oss/obs/cos/s3 一等支持）
-
 # 1. 注册 bucket 凭据（Fernet 加密落库，永不回显）
 curl -X POST :8000/v1/stores -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d '{
   "name": "novo-oss", "provider": "aliyun-oss", "bucket": "novo-china-region",

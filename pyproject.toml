@@ -11,12 +11,10 @@ dependencies = [
     "cryptography>=43",
     "email-validator>=2",
     "httpx>=0.27",
+    # Unified object-storage access layer (oss/obs/cos/s3/azblob first-class).
+    # Hard dependency: automated pulls are a core feature, not an add-on.
+    "opendal>=0.45",
 ]
-
-[project.optional-dependencies]
-# Unified object-storage access layer (oss/obs/cos/s3 first-class).
-# pip install 'opendal' enables credentialed bucket access; see README.
-opendal = ["opendal>=0.45"]
 
 [dependency-groups]
 dev = [
