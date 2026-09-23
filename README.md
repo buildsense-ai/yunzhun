@@ -119,6 +119,24 @@ data = op.read("reports/2026/summary.pdf")
 | `YUNZHUN_SYNC_INTERVAL_SECONDS` | `120` | 同步周期 |
 | `YUNZHUN_ENCRYPTION_KEY` | 自动生成 `.fernet.key` | Fernet 密钥 |
 
+### 语义判断层：Jev（可选）
+
+正则提取负责"地址在哪、是什么"（确定性、零成本）；语义判断交给 [Jev](https://docs.typesafe.ai)
+（TypeSafe System One 决策模型，毫秒级、无幻觉、结构化概率输出）。对任意已读邮件发一次
+批量判断（单次调用并行三问）：
+
+```bash
+curl -X POST :8000/v1/messages/42/judge -H "X-API-Key: $KEY"
+# → {"category": "delivery", "category_confidence": 0.92,
+#    "storage_delivery": 0.97, "action_required": 1, "model": "jev-1.13.0"}
+
+# 按语义查询：找出所有数据交付邮件
+curl ":8000/v1/accounts/1/judgments?category=delivery&min_storage_delivery=0.5" -H "X-API-Key: $KEY"
+```
+
+启用：设置 `YUNZHUN_JEV_API_KEY`（或 `TYPESAFE_API_KEY`）环境变量，未配置时接口返回 503。
+分类维度：`delivery/billing/security/notification/personal/other` + 交付概率（Noul）+ 行动紧迫度（Score 0-2）。
+
 ## 设计边界（v1）
 
 - POP3 仅作备用读取通道；同步、标记、删除等主链路基于 IMAP（UID 语义远强于 POP3 UIDL）

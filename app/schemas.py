@@ -150,3 +150,15 @@ class SyncResult(BaseModel):
 # ---------- object-storage refs ----------
 class ObjectFetchRequest(BaseModel):
     url: str = Field(min_length=1, description="object URL previously extracted by the gateway")
+
+
+# ---------- jev judgments ----------
+class JudgmentOut(BaseModel):
+    message_id: int
+    category: str
+    category_confidence: float
+    storage_delivery: float
+    action_required: int
+    model: str
+
+    model_config = {"from_attributes": True}

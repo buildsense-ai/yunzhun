@@ -107,6 +107,9 @@ class Message(Base):
     object_refs: Mapped[list["ObjectRef"]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
+    judgment: Mapped["Judgment | None"] = relationship(
+        back_populates="message", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class Attachment(Base):
@@ -141,3 +144,21 @@ class ObjectRef(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     message: Mapped[Message] = relationship(back_populates="object_refs")
+
+
+class Judgment(Base):
+    """Jev (System One) semantic judgment for a message."""
+
+    __tablename__ = "judgments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id"), unique=True, index=True)
+    category: Mapped[str] = mapped_column(String(40))  # delivery|billing|security|notification|personal|other
+    category_confidence: Mapped[float] = mapped_column(default=0.0)
+    storage_delivery: Mapped[float] = mapped_column(default=0.0)  # Noul p(true)
+    action_required: Mapped[int] = mapped_column(default=0)  # Score 0..2
+    model: Mapped[str] = mapped_column(String(40), default="")
+    raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    message: Mapped[Message] = relationship(back_populates="judgment")

@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     sync_interval_seconds: int = 120
     flag_refresh_window: int = 200
 
+    # Jev (TypeSafe System One) semantic judgment layer; empty key = feature off
+    jev_api_key: str = ""
+    jev_model: str = "jev-latest"
+
 
 @lru_cache
 def get_settings() -> Settings:
