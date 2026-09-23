@@ -190,6 +190,18 @@ curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: ap
 curl -X POST ":8000/v1/pipeline/run" -H "X-API-Key: $KEY"
 ```
 
+## 看板前端（web/）
+
+Nuxt 3 + UnoCSS 单页看板，生物实验室暗色主题，每 15s 轮询 `GET /v1/board`：
+
+```bash
+cd web && pnpm install
+NUXT_PUBLIC_API_BASE=http://localhost:8000 NUXT_PUBLIC_API_KEY=$KEY pnpm dev
+```
+
+列：待判定 → 已识别交付 → 已下载 / 失败 →（分析中 / 已归档为下游占位列）。
+点卡片看存储引用 + 逐文件下载记录。
+
 ## 实时推送（IMAP IDLE，默认开启）
 
 每个账号一条 IDLE 守护线程盯 INBOX：服务器一推送 `EXISTS`/`RECENT`/`FETCH`/`EXPUNGE`
