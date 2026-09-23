@@ -9,8 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from ..db import SessionLocal
 from ..mail.storagelinks import classify
-from ..models import Account, Message, ObjectRef
-from ..schemas import ObjectFetchRequest, StorageRefOut
+from ..models import Account, Judgment, Message, ObjectRef
+from ..schemas import ObjectRefDetailOut, ObjectFetchRequest, StorageRefOut
 from ..security import require_api_key
 from ..services.mailbox import scan_message_objects
 
@@ -36,32 +36,53 @@ def rescan_message_objects(message_id: int) -> list[ObjectRef]:
     return scan_message_objects(message_id)
 
 
-@router.get("/v1/accounts/{account_id}/objects", response_model=list[StorageRefOut])
+@router.get("/v1/accounts/{account_id}/objects", response_model=list[ObjectRefDetailOut])
 def list_account_objects(
     account_id: int,
     provider: str | None = Query(
         default=None,
-        description="aliyun-oss | tencent-cos | huawei-obs | aws-s3 | gcs | azure-blob | s3-compatible",
+        description="aliyun-oss | tencent-cos | huawei-obs | aws-s3 | gcs | azure-blob | s3-compatible | cloud-drive",
     ),
     bucket: str | None = None,
+    category: str | None = Query(
+        default=None,
+        description="Jev judgment filter: delivery | billing | security | notification | personal | other",
+    ),
     limit: int = Query(default=100, ge=1, le=500),
-) -> list[ObjectRef]:
+) -> list[dict]:
+    """Storage-address inventory enriched with subject + Jev judgment context."""
     with SessionLocal() as session:
         if session.get(Account, account_id) is None:
             raise LookupError(f"account {account_id} not found")
         stmt = (
             select(ObjectRef)
             .join(Message, ObjectRef.message_id == Message.id)
+            .outerjoin(Judgment, Judgment.message_id == Message.id)
             .where(ObjectRef.account_id == account_id)
-            .options(selectinload(ObjectRef.message))
+            .options(selectinload(ObjectRef.message).selectinload(Message.judgment))
         )
         if provider:
             stmt = stmt.where(ObjectRef.provider == provider)
         if bucket:
             stmt = stmt.where(ObjectRef.bucket == bucket)
-        return session.scalars(
+        if category:
+            stmt = stmt.where(Judgment.category == category)
+        refs = session.scalars(
             stmt.order_by(Message.internal_date.desc().nulls_last(), ObjectRef.id.desc()).limit(limit)
         ).all()
+        out = []
+        for r in refs:
+            item = StorageRefOut.model_validate(r).model_dump()
+            item["subject"] = r.message.subject
+            j = r.message.judgment
+            item.update(
+                category=j.category if j else None,
+                category_confidence=j.category_confidence if j else None,
+                storage_delivery=j.storage_delivery if j else None,
+                action_required=j.action_required if j else None,
+            )
+            out.append(item)
+        return out
 
 
 @router.post("/v1/objects/fetch")

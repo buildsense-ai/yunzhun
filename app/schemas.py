@@ -80,6 +80,16 @@ class StorageRefOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ObjectRefDetailOut(StorageRefOut):
+    """Storage ref enriched with the subject + Jev judgment of its message."""
+
+    subject: str | None = None
+    category: str | None = None
+    category_confidence: float | None = None
+    storage_delivery: float | None = None
+    action_required: int | None = None
+
+
 class MessageListItem(BaseModel):
     id: int
     uid: int
