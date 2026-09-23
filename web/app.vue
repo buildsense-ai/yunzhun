@@ -5,13 +5,24 @@ const api = useApi();
 const board = ref<BoardResponse | null>(null);
 const selected = ref<BoardCard | null>(null);
 const lastRefresh = ref<Date | null>(null);
+const stale = ref(false);  // showing cached data while offline
+
+const CACHE_KEY = "yunzhun-board-cache";
 
 async function refresh() {
   try {
-    board.value = await api<BoardResponse>("/v1/board");
+    const data = await api<BoardResponse>("/v1/board");
+    board.value = data;
     lastRefresh.value = new Date();
+    stale.value = false;
+    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
   } catch (e) {
-    console.error("board fetch failed", e);
+    // offline / gateway down: fall back to the last cached snapshot
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached && !board.value) {
+      board.value = JSON.parse(cached);
+    }
+    stale.value = true;
   }
 }
 
@@ -47,6 +58,9 @@ function fmtBytes(n: number): string {
         <span>文件 <b class="text-bio-emerald">{{ board.stats.files_done }}</b></span>
         <span v-if="board.stats.files_failed" class="text-bio-rose">失败 {{ board.stats.files_failed }}</span>
         <span>体积 <b class="text-bio-ink">{{ fmtBytes(board.stats.bytes) }}</b></span>
+        <span v-if="stale" class="text-bio-amber flex items-center gap-1">
+          <span class="i-lucide-wifi-off" /> 离线缓存
+        </span>
         <span v-if="lastRefresh" class="opacity-60">{{ lastRefresh.toLocaleTimeString() }}</span>
       </div>
     </header>
