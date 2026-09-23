@@ -31,6 +31,14 @@ async def _background_sync() -> None:
         try:
             stats = await asyncio.to_thread(sync_all_accounts)
             log.info("sync round done: %s", stats)
+            # event-driven: new mail activates the pipeline immediately,
+            # no waiting for the next pipeline tick
+            if any(s.get("new_messages") for s in stats):
+                from .services.pipeline import process_pending
+
+                pstats = await asyncio.to_thread(process_pending)
+                if pstats.get("pulled"):
+                    log.info("sync-triggered pipeline: %s", pstats)
         except Exception:  # noqa: BLE001
             log.exception("background sync round failed")
         await asyncio.sleep(settings.sync_interval_seconds)

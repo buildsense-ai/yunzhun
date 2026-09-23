@@ -53,25 +53,27 @@ def test_pipeline_runs_end_to_end(monkeypatch, tmp_path):
         r = c.post("/v1/accounts", headers=HEADERS,
                    json={"address": "pipe@163.com", "auth_code": "A", "verify": False})
         aid = r.json()["id"] if r.status_code == 201 else int(r.json()["detail"].rsplit("=", 1)[-1].rstrip(")"))
+
+        # register credentials BEFORE sync: the sync endpoint's event-driven
+        # kick runs fetch -> judge -> pull in the background task
+        c.post("/v1/stores", headers=HEADERS,
+               json={"name": "pipe-oss", "provider": "aliyun-oss", "bucket": "bktdir",
+                     "region": "cn-hangzhou", "access_key_id": "AK", "secret_access_key": "SK"})
         c.post(f"/v1/accounts/{aid}/sync", headers=HEADERS, json={})
 
-        # register credentials for the oss bucket inside the mail bodies
-        r = c.post("/v1/stores", headers=HEADERS,
-                   json={"name": "pipe-oss", "provider": "aliyun-oss", "bucket": "bktdir",
-                         "region": "cn-hangzhou", "access_key_id": "AK", "secret_access_key": "SK"})
-        assert r.status_code == 201
-
-        # manual pipeline round (same function the background loop calls)
-        from app.services.pipeline import process_pending
-        stats = process_pending()
-        assert stats["judged"] >= 3  # all pending messages judged
-        assert stats["pulled"] >= 1  # uid-2 delivery mail auto-downloaded
-
-        # downloaded file exists under the scoped dir
+        # end state: uid-2 delivery mail was auto-downloaded during the sync kick
         pulled = list((tmp_path / "dl").rglob("dump.csv"))
         assert pulled and pulled[0].read_bytes().startswith(b"CONTENT:")
 
-        # second round: nothing pending
+        # pull record persisted
+        items = c.get(f"/v1/accounts/{aid}/messages", headers=HEADERS,
+                      params={"folder": "INBOX"}).json()
+        mid = next(m for m in items if m["uid"] == 2)["id"]
+        records = c.get(f"/v1/messages/{mid}/pulls", headers=HEADERS).json()
+        assert any(r["status"] == "done" for r in records)
+
+        # explicit round: nothing pending anymore
+        from app.services.pipeline import process_pending
         stats2 = process_pending()
         assert stats2["pending"] == 0
 

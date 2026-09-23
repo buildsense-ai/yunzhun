@@ -108,7 +108,9 @@ def _watch(account_id: int, stop: threading.Event) -> None:
         if "IDLE" not in getattr(imap, "capabilities", ()):
             log.info("account %s: no IDLE capability, polling instead", account_id)
             while not stop.wait(settings.sync_interval_seconds):
-                sync_account(account_id)
+                stats = sync_account(account_id)
+                if stats.get("new_messages"):
+                    process_pending()  # event-driven activation, same as IDLE path
             return
 
         while not stop.is_set():

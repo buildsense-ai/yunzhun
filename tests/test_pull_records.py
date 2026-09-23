@@ -54,20 +54,25 @@ def _setup(client):
     r = client.post("/v1/accounts", headers=HEADERS,
                     json={"address": "rec@163.com", "auth_code": "A", "verify": False})
     aid = r.json()["id"] if r.status_code == 201 else int(r.json()["detail"].rsplit("=", 1)[-1].rstrip(")"))
-    client.post(f"/v1/accounts/{aid}/sync", headers=HEADERS, json={})
-    items = client.get(f"/v1/accounts/{aid}/messages", headers=HEADERS,
-                       params={"folder": "INBOX"}).json()
-    mid = next(m for m in items if m["uid"] == 2)["id"]
-    client.get(f"/v1/messages/{mid}", headers=HEADERS)
-    client.post(f"/v1/messages/{mid}/judge", headers=HEADERS)
 
+    # clear leftover bktdir stores BEFORE sync: the endpoint's event-driven
+    # kick would otherwise pull the file before this test's own pull
     from app.db import SessionLocal
     from app.models import PullRecord, Store
     from sqlalchemy import delete as sql_delete
     with SessionLocal() as s:
         s.execute(sql_delete(Store).where(Store.bucket == "bktdir"))
+        s.commit()
+
+    client.post(f"/v1/accounts/{aid}/sync", headers=HEADERS, json={})
+    items = client.get(f"/v1/accounts/{aid}/messages", headers=HEADERS,
+                       params={"folder": "INBOX"}).json()
+    mid = next(m for m in items if m["uid"] == 2)["id"]
+    with SessionLocal() as s:
         s.execute(sql_delete(PullRecord).where(PullRecord.message_id == mid))
         s.commit()
+    client.get(f"/v1/messages/{mid}", headers=HEADERS)
+    client.post(f"/v1/messages/{mid}/judge", headers=HEADERS)
     client.post("/v1/stores", headers=HEADERS,
                 json={"name": "rec-oss", "provider": "aliyun-oss", "bucket": "bktdir",
                       "region": "cn-hangzhou", "access_key_id": "AK", "secret_access_key": "SK"})

@@ -61,7 +61,9 @@ def test_llm_fallback_triggers_on_delivery_without_regex(monkeypatch):
 
         r = c.post(f"/v1/messages/{uid1['id']}/judge", headers=HEADERS)
         assert r.status_code == 200, r.text
-        assert len(llm_calls) == 1  # fallback fired
+        # the sync kick's process_pending is global — other accounts' pending
+        # mail may also trigger the fallback; what matters is it fired for uid1
+        assert len(llm_calls) >= 1
 
         refs = c.get(f"/v1/messages/{uid1['id']}/objects", headers=HEADERS).json()
         assert len(refs) == 1
@@ -73,8 +75,10 @@ def test_llm_fallback_triggers_on_delivery_without_regex(monkeypatch):
         # account-level: llm-sourced ref visible with judgment context
         r = c.get(f"/v1/accounts/{aid}/objects", headers=HEADERS,
                   params={"category": "delivery"})
-        assert len(r.json()) == 1
-        assert r.json()[0]["storage_delivery"] == 0.93
+        llm_refs = [x for x in r.json() if x["source"] == "llm"]
+        assert len(llm_refs) == 1
+        assert llm_refs[0]["bucket"] == "prose-bkt"
+        assert llm_refs[0]["storage_delivery"] == 0.93
 
 
 def test_llm_fallback_not_triggered_when_regex_found_something(monkeypatch):

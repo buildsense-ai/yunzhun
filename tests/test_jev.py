@@ -54,6 +54,11 @@ def client(monkeypatch):
         lambda: ("https://ai-gateway.vercel.sh/typesafe/v1/systemone",
                  "typesafe-ai/jev", "fake-gw-key"),
     )
+    # these tests exercise the manual /judge endpoint; keep sync from
+    # auto-running the pipeline (event-driven kick) so bodies stay unfetched
+    import app.services.pipeline as pipeline_service
+
+    monkeypatch.setattr(pipeline_service, "process_pending", lambda **kw: {})
     with TestClient(app) as c:
         yield c, calls
 

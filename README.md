@@ -226,13 +226,15 @@ export default {
 
 入站邮件落在合成账号 `inbound@webhook.local` 下（provider=webhook，不参与 IMAP 同步/IDLE）。
 
-### 全自动流水线（默认开启）
+### 全自动流水线（事件驱动 + 定时兑底）
 
-服务启动后，后台每 `YUNZHUN_PIPELINE_INTERVAL_SECONDS`（默认 60s）跑一轮：
+**事件驱动**：任何入口发现新邮件都立即激活下载链——IDLE 推送、入站 webhook、
+手动 `/sync`、轮询同步检出 `new_messages>0` 时都会当场 kick 一轮 pipeline。
+后台循环（每 `YUNZHUN_PIPELINE_INTERVAL_SECONDS`，默认 60s）只是兑底清扫。
 
 ```
-新邮件 → 同步入库(后台) → 拉正文 → Jev 判定 → [delivery 且 ≥0.5] → OpenDAL 自动下载
-                                                ↘ 未注册凭据的 bucket → skipped 带原因
+新邮件事件 → 拉正文 → Jev 判定 → [delivery 且 ≥0.5] → OpenDAL 自动下载
+                                       ↘ 未注册凭据的 bucket → skipped 带原因
 ```
 
 开关与参数：`YUNZHUN_PIPELINE_ENABLED=true`、`YUNZHUN_PIPELINE_INTERVAL_SECONDS=60`、

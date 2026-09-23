@@ -1,7 +1,7 @@
 """Sending (SMTP) and sync trigger endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from ..db import SessionLocal
 from ..mail import smtp as smtp_client
@@ -43,11 +43,18 @@ def send(account_id: int, body: SendRequest) -> SendResult:
 
 
 @router.post("/v1/accounts/{account_id}/sync", response_model=SyncResult)
-def trigger_sync(account_id: int, body: SyncMode | None = None) -> SyncResult:
+def trigger_sync(
+    account_id: int, background: BackgroundTasks, body: SyncMode | None = None
+) -> SyncResult:
     mode = (body.mode if body else "incremental")
     if mode not in ("incremental", "full"):
         from fastapi import HTTPException
 
         raise HTTPException(400, "mode must be 'incremental' or 'full'")
     stats = sync_account(account_id, mode=mode)
+    if stats.get("new_messages"):
+        # event-driven: new mail kicks the pipeline right away
+        from ..services.pipeline import process_pending
+
+        background.add_task(process_pending)
     return SyncResult(**stats)
