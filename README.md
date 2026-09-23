@@ -186,6 +186,46 @@ curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: ap
 - 单文件失败不中断整批，失败原因落库（`status=failed` + `error`）
 - `YUNZHUN_WEBHOOK_URL`：每次自动拉取成功后 POST 通知（best-effort）
 
+### 实时推送（IMAP IDLE，默认开启）
+
+每个账号一条 IDLE 守护线程盯 INBOX：服务器一推送 `EXISTS`/`RECENT`/`FETCH`/`EXPUNGE`
+就立即触发增量同步 + pipeline 一轮——交付邮件**秒级落盘**，不用等轮询。
+服务器不支持 IDLE 时自动回退到 `YUNZHUN_SYNC_INTERVAL_SECONDS` 轮询；
+掉线指数退避重连（5s→300s），25 分钟心跳重发 IDLE（RFC 2177 <29min 限制）。
+开关：`YUNZHUN_IDLE_ENABLED=true`、`YUNZHUN_IDLE_FOLDER=INBOX`。
+
+### 入站 Webhook（免 IMAP 收信）
+
+任何能 POST 的来源都可以把原始邮件直接推进流水线——存库、提地址、后台立即判定+下载：
+
+```bash
+# 裸 MIME
+curl -X POST :8000/v1/inbound -H "X-API-Key: $KEY" \
+  -H "Content-Type: message/rfc822" --data-binary @mail.eml
+# 或 JSON
+curl -X POST :8000/v1/inbound -H "X-API-Key: $KEY" \
+  -d '{"raw_base64": "..."}'
+```
+
+配 Cloudflare Email Routing 就是真正的实时 webhook：你的域名收信 → Worker POST 到这里，
+IMAP 都不用连。Worker 示例：
+
+```js
+export default {
+  async email(message, env) {
+    const raw = await new Response(message.raw).arrayBuffer();
+    await fetch(env.GATEWAY + "/v1/inbound", {
+      method: "POST",
+      headers: { "X-API-Key": env.KEY, "Content-Type": "message/rfc822" },
+      body: raw,
+    });
+    await message.forward(env.FALLBACK);  // 可选：同时转发到原邮箱
+  },
+};
+```
+
+入站邮件落在合成账号 `inbound@webhook.local` 下（provider=webhook，不参与 IMAP 同步/IDLE）。
+
 ### 全自动流水线（默认开启）
 
 服务启动后，后台每 `YUNZHUN_PIPELINE_INTERVAL_SECONDS`（默认 60s）跑一轮：

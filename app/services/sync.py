@@ -6,7 +6,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session as SASession
 
-from ..config import get_settings
+from ..config import PROVIDERS, get_settings
 from ..db import SessionLocal
 from ..mail import imap as imap_client
 from ..mail.imap import ImapAccount, MailError
@@ -155,7 +155,9 @@ def sync_account(account_id: int, mode: str = "incremental") -> dict:
 def sync_all_accounts() -> list[dict]:
     results: list[dict] = []
     with SessionLocal() as session:
-        account_ids = session.scalars(select(Account.id)).all()
+        account_ids = session.scalars(
+            select(Account.id).where(Account.provider.in_(PROVIDERS))
+        ).all()
     for account_id in account_ids:
         try:
             results.append(sync_account(account_id))

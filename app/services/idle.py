@@ -13,7 +13,7 @@ import threading
 
 from sqlalchemy import select
 
-from ..config import get_settings
+from ..config import PROVIDERS, get_settings
 from ..db import SessionLocal
 from ..mail import imap as imap_client
 from ..mail.imap import ImapAccount, MailError
@@ -56,7 +56,9 @@ class IdleManager:
     def _reconcile(self) -> None:
         try:
             with SessionLocal() as session:
-                ids = set(session.scalars(select(Account.id)).all())
+                ids = set(session.scalars(
+                    select(Account.id).where(Account.provider.in_(PROVIDERS))
+                ).all())
         except Exception:  # noqa: BLE001
             log.exception("idle reconcile failed")
             return

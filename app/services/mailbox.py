@@ -1,7 +1,7 @@
 """Per-message operations: lazy body fetch, attachment extraction, flags, delete."""
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as SASession, selectinload
 
 from ..db import SessionLocal
@@ -9,8 +9,8 @@ from ..mail import imap as imap_client
 from ..mail.imap import ImapAccount, MailError
 from ..mail.parse import decode_header_value, extract_leaf_part, parse_message
 from ..mail.storagelinks import extract_storage_refs
-from ..models import Account, Attachment, Message, ObjectRef, utcnow
-from ..security import decrypt
+from ..models import Account, Attachment, Folder, Message, ObjectRef, utcnow
+from ..security import decrypt, encrypt
 
 LEAF_FLAG_MAP = {
     "\\Seen": "seen",
@@ -170,6 +170,76 @@ def delete_message(message_id: int) -> None:
                 pass
         session.delete(msg)
         session.commit()
+
+
+def ingest_raw_message(raw: bytes, account_address: str = "inbound@webhook.local") -> Message:
+    """Store a webhook-delivered raw RFC822 message under a synthetic account.
+
+    The synthetic account uses provider='webhook' so it is excluded from IMAP
+    sync/IDLE; the body is already local so the message goes straight into the
+    judge/pull pipeline via the normal pending query.
+    """
+    parsed = parse_message(raw)
+    with SessionLocal() as session:
+        account = session.scalar(
+            select(Account).where(Account.address == account_address)
+        )
+        if account is None:
+            account = Account(
+                address=account_address, provider="webhook",
+                auth_code_enc=encrypt("-"), status="inbound",
+            )
+            session.add(account)
+            session.flush()
+        folder = session.scalar(
+            select(Folder).where(
+                Folder.account_id == account.id, Folder.name == "INBOX"
+            )
+        )
+        if folder is None:
+            folder = Folder(account_id=account.id, name="INBOX", name_decoded="INBOX")
+            session.add(folder)
+            session.flush()
+        next_uid = (
+            session.scalar(
+                select(func.max(Message.uid)).where(Message.folder_id == folder.id)
+            )
+            or 0
+        ) + 1
+        msg = Message(
+            account_id=account.id,
+            folder_id=folder.id,
+            uid=next_uid,
+            message_id=parsed["message_id"],
+            subject=parsed["subject"],
+            from_addr=parsed["from"],
+            to_addrs=parsed["to"],
+            cc_addrs=parsed["cc"],
+            date=parsed["date"],
+            size=len(raw),
+            flags=[],
+            raw=raw,
+            text_body=parsed["text"],
+            html_body=parsed["html"],
+            snippet=parsed["snippet"],
+            body_fetched=True,
+        )
+        session.add(msg)
+        session.flush()
+        for att in parsed["attachments"]:
+            msg.attachments.append(
+                Attachment(
+                    filename=att["filename"],
+                    content_type=att["content_type"],
+                    disposition=att["disposition"],
+                    size=att["size"],
+                    part_index=att["part_index"],
+                )
+            )
+        _replace_object_refs(session, msg, extract_storage_refs(parsed["text"], parsed["html"]))
+        session.commit()
+        session.refresh(msg)
+        return msg
 
 
 def mark_seen(message_id: int) -> Message:

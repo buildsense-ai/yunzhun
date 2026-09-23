@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from .config import get_settings
 from .db import init_db
 from .mail.imap import MailError
-from .routers import accounts, folders, judgments, messages, objects, sending, stores
+from .routers import accounts, folders, inbound, judgments, messages, objects, sending, stores
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("yunzhun")
@@ -83,6 +83,7 @@ app.add_middleware(
 )
 
 app.include_router(accounts.router)
+app.include_router(inbound.router)
 app.include_router(folders.router)
 app.include_router(messages.router)
 app.include_router(objects.router)
