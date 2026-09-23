@@ -67,6 +67,15 @@ def test_s3_scheme_and_minio_presigned():
     assert (m.provider, m.presigned) == ("s3-compatible", True)
 
 
+def test_native_store_schemes():
+    ref = classify("oss://novo-china-region/X101SC26023844-Z01/X101SC26023844-Z01-J039")
+    assert (ref.provider, ref.bucket, ref.key) == (
+        "aliyun-oss", "novo-china-region", "X101SC26023844-Z01/X101SC26023844-Z01-J039",
+    )
+    assert classify("cos://bkt-125000/path/obj").provider == "tencent-cos"
+    assert classify("obs://bkt/dir/file").provider == "huawei-obs"
+
+
 def test_cloud_drive_share_links():
     ref = classify("https://pan.sysu.edu.cn/link/AAD59C706CF8C5499880C854A7B76F4E11")
     assert (ref.provider, ref.bucket, ref.key) == (

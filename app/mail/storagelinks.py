@@ -12,8 +12,10 @@ from dataclasses import dataclass
 from urllib.parse import parse_qs, unquote, urlsplit
 
 # Broad URL candidates: hrefs/src/text. Stops at quotes/whitespace/closing brackets.
+# Includes native object-store schemes (oss://, cos://, obs://, s3://) used by
+# data-delivery mails (e.g. Novogene "数据交付位置：oss://bucket/key").
 URL_RE = re.compile(
-    r"""(?:https?://|s3://)[^\s<>"'`)\]}]+""",
+    r"""(?:https?://|(?:oss|cos|obs|s3)://)[^\s<>"'`)\]}]+""",
 )
 _TRAILING_PUNCT = ".,;:!?'\""
 
@@ -74,9 +76,15 @@ def classify(url: str) -> StorageRef | None:
         return None
     presigned = _is_presigned(query)
 
-    if scheme == "s3":
-        bucket = host
-        return StorageRef("s3-compatible", bucket, unquote(path.lstrip("/")), None, url, presigned)
+    if scheme in ("oss", "cos", "obs", "s3"):
+        provider = {
+            "oss": "aliyun-oss",
+            "cos": "tencent-cos",
+            "obs": "huawei-obs",
+            "s3": "s3-compatible",
+        }[scheme]
+        # scheme://bucket/key — urlsplit puts bucket in netloc
+        return StorageRef(provider, host, unquote(path.lstrip("/")), None, url, presigned)
 
     # --- virtual-hosted style: bucket in subdomain ---
     m = re.match(

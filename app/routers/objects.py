@@ -73,6 +73,11 @@ def fetch_object(body: ObjectFetchRequest) -> StreamingResponse:
     """
     if classify(body.url) is None:
         raise HTTPException(400, "URL is not a recognized object-storage reference")
+    if not body.url.lower().startswith(("http://", "https://")):
+        raise HTTPException(
+            400,
+            f"{body.url.split(':', 1)[0]}:// requires credentials; use the OpenDAL integration (see README)",
+        )
     resp = httpx.request("GET", body.url, timeout=_FETCH_TIMEOUT, follow_redirects=True)
     if resp.status_code >= 400:
         raise HTTPException(502, f"upstream fetch failed: HTTP {resp.status_code}")
