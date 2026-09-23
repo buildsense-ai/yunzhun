@@ -121,6 +121,20 @@ data = op.read("reports/2026/summary.pdf")
 
 ### 语义判断层：Jev（可选，Vercel 通道免费）
 
+### 语义判断层：Jev（可选，Vercel 通道免费）
+
+**找地址的三级流水线**（intent routing：Jev 先判 → 正则再提 → LLM 兑底）：
+
+```
+① Jev 判断（单次批量调用，毫秒级）：是否交付邮件 / 交付概率 / 紧迫度
+② 正则提取（确定性）：oss:// obs:// https:// pan.* 等全部形态，零误报验证
+③ LLM 兑底（仅当 ①说有交付 且 ②一无所获）：读全文，把散文形态
+   （"bucket: x，前缀： y"）归一化成标准 URI；LLM 结果仍须通过 classify() 验证入库
+```
+
+LLM 兑底默认关闭，设 `YUNZHUN_LLM_MODEL=openai/gpt-4.1-mini`（走同一个 AI Gateway key）开启；
+每条入库地址带 `source` 字段（regex | llm）可追溯。
+
 正则提取负责"地址在哪、是什么"（确定性、零成本）；语义判断交给 [Jev](https://docs.typesafe.ai)
 （TypeSafe System One 决策模型，毫秒级、无幻觉、结构化概率输出）。支持两个 provider（协议一致，仅换
 base_url/key/model）：

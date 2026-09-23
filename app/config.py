@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     # Automated pulls
     download_dir: str = "./downloads"
 
+    # LLM fallback extraction: runs only when Jev flags delivery-ish AND regex
+    # found nothing. Route through the Vercel AI Gateway (OpenAI-compatible).
+    llm_model: str = ""  # e.g. "openai/gpt-4.1-mini"; empty = fallback disabled
+    llm_api_key: str = ""  # defaults to vercel_gateway_key / AI_GATEWAY_API_KEY
+
 
 @lru_cache
 def get_settings() -> Settings:

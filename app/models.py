@@ -141,6 +141,7 @@ class ObjectRef(Base):
     region: Mapped[str | None] = mapped_column(String(64), nullable=True)
     url: Mapped[str] = mapped_column(Text)
     presigned: Mapped[bool] = mapped_column(Boolean, default=False)
+    source: Mapped[str] = mapped_column(String(20), default="regex")  # regex | llm
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     message: Mapped[Message] = relationship(back_populates="object_refs")

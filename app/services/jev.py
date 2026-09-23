@@ -154,6 +154,15 @@ def judge_message(message_id: int) -> Judgment:
         judgment.raw = data
         msg.judgment = judgment
         session.commit()
+
+        # intent-routing pipeline step 3: Jev flagged delivery + regex empty -> LLM
+        if get_settings().llm_model:
+            from .llm_extract import llm_fallback_extract, maybe_run_fallback
+
+            with SessionLocal() as s2:
+                if maybe_run_fallback(s2, message_id):
+                    llm_fallback_extract(message_id)
+
         return session.scalars(
             select(Judgment).where(Judgment.message_id == message_id)
         ).one()
