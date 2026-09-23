@@ -25,4 +25,7 @@ dev = [
 ]
 
 [tool.pdm]
-package-type = "application"
+distribution = false
+
+[tool.pdm.scripts]
+eval = {cmd = "python -m eval.run_eval"}
