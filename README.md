@@ -109,19 +109,7 @@ data = op.read("reports/2026/summary.pdf")
 # 同一套代码换 "cos"/"obs"/"s3" 服务名即可，无需改业务逻辑
 ```
 
-## 配置
-
-| 环境变量 | 默认 | 说明 |
-|---|---|---|
-| `YUNZHUN_API_KEY` | `dev-key-change-me` | 网关 API Key |
-| `YUNZHUN_DB_URL` | SQLite | 生产可换 `postgresql://...` |
-| `YUNZHUN_SYNC_ENABLED` | `true` | 后台定时同步开关 |
-| `YUNZHUN_SYNC_INTERVAL_SECONDS` | `120` | 同步周期 |
-| `YUNZHUN_ENCRYPTION_KEY` | 自动生成 `.fernet.key` | Fernet 密钥 |
-
-### 语义判断层：Jev（可选，Vercel 通道免费）
-
-### 语义判断层：Jev（可选，Vercel 通道免费）
+## 语义判断层：Jev（可选，Vercel 通道免费）
 
 **找地址的三级流水线**（intent routing：Jev 先判 → 正则再提 → LLM 兑底）：
 
@@ -159,7 +147,7 @@ curl ":8000/v1/accounts/1/judgments?category=delivery&min_storage_delivery=0.5" 
 未配置时接口返回 503。分类维度：`delivery/billing/security/notification/personal/other`
 + 交付概率（Noul）+ 行动紧迫度（Score 0-2）。
 
-### 自动化下载（凭据注册 + 置信门禁 + OpenDAL）
+## 自动化下载（凭据注册 + 置信门禁 + OpenDAL）
 
 ```bash
 pdm install --extra opendal   # Apache OpenDAL（Rust 内核，oss/obs/cos/s3 一等支持）
@@ -186,7 +174,25 @@ curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: ap
 - 单文件失败不中断整批，失败原因落库（`status=failed` + `error`）
 - `YUNZHUN_WEBHOOK_URL`：每次自动拉取成功后 POST 通知（best-effort）
 
-### 实时推送（IMAP IDLE，默认开启）
+## 全自动流水线（事件驱动 + 定时兑底）
+
+**事件驱动**：任何入口发现新邮件都立即激活下载链——IDLE 推送、入站 webhook、
+手动 `/sync`、轮询同步检出 `new_messages>0` 时都会当场 kick 一轮 pipeline。
+后台循环（每 `YUNZHUN_PIPELINE_INTERVAL_SECONDS`，默认 60s）只是兑底清扫。
+
+```
+新邮件事件 → 拉正文 → Jev 判定 → [delivery 且 ≥0.5] → OpenDAL 自动下载
+                                       ↘ 未注册凭据的 bucket → skipped 带原因
+```
+
+开关与参数：`YUNZHUN_PIPELINE_ENABLED=true`、`YUNZHUN_PIPELINE_INTERVAL_SECONDS=60`、
+`YUNZHUN_PIPELINE_BATCH_LIMIT=20`（每轮最多处理条数，防免费层限流）。手动触发单轮：
+
+```bash
+curl -X POST ":8000/v1/pipeline/run" -H "X-API-Key: $KEY"
+```
+
+## 实时推送（IMAP IDLE，默认开启）
 
 每个账号一条 IDLE 守护线程盯 INBOX：服务器一推送 `EXISTS`/`RECENT`/`FETCH`/`EXPUNGE`
 就立即触发增量同步 + pipeline 一轮——交付邮件**秒级落盘**，不用等轮询。
@@ -194,7 +200,7 @@ curl -X POST :8000/v1/messages/17/pull -H "X-API-Key: $KEY" -H "Content-Type: ap
 掉线指数退避重连（5s→300s），25 分钟心跳重发 IDLE（RFC 2177 <29min 限制）。
 开关：`YUNZHUN_IDLE_ENABLED=true`、`YUNZHUN_IDLE_FOLDER=INBOX`。
 
-### 入站 Webhook（免 IMAP 收信）
+## 入站 Webhook（免 IMAP 收信）
 
 任何能 POST 的来源都可以把原始邮件直接推进流水线——存库、提地址、后台立即判定+下载：
 
@@ -226,23 +232,28 @@ export default {
 
 入站邮件落在合成账号 `inbound@webhook.local` 下（provider=webhook，不参与 IMAP 同步/IDLE）。
 
-### 全自动流水线（事件驱动 + 定时兑底）
+## 配置
 
-**事件驱动**：任何入口发现新邮件都立即激活下载链——IDLE 推送、入站 webhook、
-手动 `/sync`、轮询同步检出 `new_messages>0` 时都会当场 kick 一轮 pipeline。
-后台循环（每 `YUNZHUN_PIPELINE_INTERVAL_SECONDS`，默认 60s）只是兑底清扫。
-
-```
-新邮件事件 → 拉正文 → Jev 判定 → [delivery 且 ≥0.5] → OpenDAL 自动下载
-                                       ↘ 未注册凭据的 bucket → skipped 带原因
-```
-
-开关与参数：`YUNZHUN_PIPELINE_ENABLED=true`、`YUNZHUN_PIPELINE_INTERVAL_SECONDS=60`、
-`YUNZHUN_PIPELINE_BATCH_LIMIT=20`（每轮最多处理条数，防免费层限流）。手动触发单轮：
-
-```bash
-curl -X POST ":8000/v1/pipeline/run" -H "X-API-Key: $KEY"
-```
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `YUNZHUN_API_KEY` | `dev-key-change-me` | 网关 API Key（`X-API-Key` 头） |
+| `YUNZHUN_DB_URL` | SQLite | 生产可换 `postgresql://...` |
+| `YUNZHUN_ENCRYPTION_KEY` | 自动生成 `.fernet.key` | Fernet 密钥（授权码/凭据加密） |
+| `YUNZHUN_SYNC_ENABLED` | `true` | 后台定时同步开关 |
+| `YUNZHUN_SYNC_INTERVAL_SECONDS` | `120` | 同步周期 / IDLE 回退轮询周期 |
+| `YUNZHUN_FLAG_REFRESH_WINDOW` | `200` | 标记漂移回刷窗口（最近 N 封） |
+| `YUNZHUN_JEV_PROVIDER` | `vercel` | `vercel`（免费）或 `typesafe` 直连 |
+| `YUNZHUN_VERCEL_GATEWAY_KEY` | — | Vercel AI Gateway key（Jev + LLM 兑底共用） |
+| `YUNZHUN_JEV_API_KEY` | — | TypeSafe 直连 key（provider=typesafe 时） |
+| `YUNZHUN_LLM_MODEL` | 空（关闭） | LLM 兑底模型，如 `openai/gpt-4.1-mini` |
+| `YUNZHUN_DOWNLOAD_DIR` | `./downloads` | 拉取落盘根目录 |
+| `YUNZHUN_PIPELINE_ENABLED` | `true` | 后台 pipeline 兑底循环 |
+| `YUNZHUN_PIPELINE_INTERVAL_SECONDS` | `60` | 兑底轮周期 |
+| `YUNZHUN_PIPELINE_BATCH_LIMIT` | `20` | 每轮最多处理邮件数 |
+| `YUNZHUN_IDLE_ENABLED` | `true` | IMAP IDLE 实时推送 |
+| `YUNZHUN_IDLE_FOLDER` | `INBOX` | IDLE 盯的文件夹 |
+| `YUNZHUN_IDLE_HEARTBEAT_SECONDS` | `1500` | IDLE 重发周期（RFC 2177 <29min） |
+| `YUNZHUN_WEBHOOK_URL` | 空（关闭） | 自动拉取成功后的 POST 通知地址 |
 
 ## 设计边界（v1）
 
