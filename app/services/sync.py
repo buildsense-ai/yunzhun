@@ -11,7 +11,7 @@ from ..db import SessionLocal
 from ..mail import imap as imap_client
 from ..mail.imap import ImapAccount, MailError
 from ..mail.parse import parse_header_block
-from ..models import Account, Folder, Message, utcnow
+from ..models import Account, Attachment, Folder, Judgment, Message, ObjectRef, utcnow
 from ..security import decrypt
 
 log = logging.getLogger(__name__)
@@ -70,6 +70,10 @@ def sync_folder(
 
     # UIDVALIDITY changed (or forced full): cache is invalid, wipe and resync.
     if mode == "full" or folder.uidvalidity != st.uidvalidity:
+        doomed = select(Message.id).where(Message.folder_id == folder.id)
+        session.query(ObjectRef).filter(ObjectRef.message_id.in_(doomed)).delete(synchronize_session=False)
+        session.query(Judgment).filter(Judgment.message_id.in_(doomed)).delete(synchronize_session=False)
+        session.query(Attachment).filter(Attachment.message_id.in_(doomed)).delete(synchronize_session=False)
         session.query(Message).filter(Message.folder_id == folder.id).delete()
         folder.last_seen_uid = 0
     folder.uidvalidity = st.uidvalidity

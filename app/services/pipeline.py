@@ -17,8 +17,13 @@ from ..models import Judgment, Message
 
 log = logging.getLogger(__name__)
 
+# In-process backoff: message_id -> consecutive fetch/judge failures.
+# After MAX_ATTEMPTS we stop retrying (a human can still force via API).
+_FAILURES: dict[int, int] = {}
+MAX_ATTEMPTS = 5
 
-def pending_message_ids(limit: int) -> list[int]:
+
+def pending_message_ids(limit: int) -> list[int]:    
     """Messages that still need a body fetch and/or a Jev judgment."""
     with SessionLocal() as session:
         return list(
@@ -51,11 +56,15 @@ def process_pending(limit: int | None = None, recursive: bool = True) -> dict:
     ids = pending_message_ids(limit)
     stats["pending"] = len(ids)
     for mid in ids:
+        if _FAILURES.get(mid, 0) >= MAX_ATTEMPTS:
+            stats["errors"] += 1
+            continue  # gave up on this one; a human can still force via API
         try:
             ensure_message_body(mid)
             stats["fetched"] += 1
             judgment = judge_message(mid)
             stats["judged"] += 1
+            _FAILURES.pop(mid, None)
             if judgment.category == "delivery" or judgment.storage_delivery >= 0.5:
                 result = pull_message(mid, recursive=recursive)
                 stats["pulled"] += len(result["downloaded"])
@@ -68,10 +77,14 @@ def process_pending(limit: int | None = None, recursive: bool = True) -> dict:
             if e.status_code in (429, 502, 503):
                 log.warning("pipeline pausing round on HTTP %s", e.status_code)
                 break
-            log.warning("pipeline HTTP error on message %s: %s", mid, e.detail)
+            _FAILURES[mid] = _FAILURES.get(mid, 0) + 1
+            log.warning("pipeline HTTP error on message %s (attempt %d): %s",
+                        mid, _FAILURES[mid], e.detail)
             stats["errors"] += 1
-        except LookupError as e:
-            log.warning("pipeline lookup miss: %s", e)
+        except Exception as e:  # noqa: BLE001 — MailError and friends
+            _FAILURES[mid] = _FAILURES.get(mid, 0) + 1
+            log.warning("pipeline error on message %s (attempt %d): %s",
+                        mid, _FAILURES[mid], e)
             stats["errors"] += 1
         time.sleep(0.3)  # be gentle with free-tier rate limits
     return stats

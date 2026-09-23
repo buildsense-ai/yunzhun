@@ -103,6 +103,15 @@ def test_pull_gate_and_download(client, monkeypatch):
 
     account_id, msg2_id = _setup_account_with_delivery(client)
 
+    # shared DB: clear any leftover store for this bucket so the first pull
+    # below actually hits the "no registered store" branch
+    from app.db import SessionLocal
+    from app.models import Store
+    from sqlalchemy import delete as sql_delete
+    with SessionLocal() as s:
+        s.execute(sql_delete(Store).where(Store.bucket == "bktdir"))
+        s.commit()
+
     # register a passing judgment (category=delivery) via fake jev upstream
     from app.services import jev as jev_service
 
@@ -136,7 +145,7 @@ def test_pull_gate_and_download(client, monkeypatch):
         "/v1/stores",
         headers=HEADERS,
         json={
-            "name": "bktdir-oss", "provider": "aliyun-oss", "bucket": "bktdir",
+            "name": "bktdir-oss-gate", "provider": "aliyun-oss", "bucket": "bktdir",
             "region": "cn-hangzhou", "access_key_id": "AK-TEST", "secret_access_key": "SK-TEST",
         },
     )

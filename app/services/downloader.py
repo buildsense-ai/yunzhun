@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as SASession
 
 from ..db import SessionLocal
-from ..models import Store
+from ..models import ObjectRef, Store
 from ..security import decrypt
 
 # provider -> OpenDAL service name
@@ -88,10 +88,15 @@ def _safe_local_path(base: Path, key: str) -> Path:
     return target
 
 
-def _walk_prefix(op, prefix: str, max_files: int) -> list[str]:
+def _walk_prefix(op, prefix: str, max_files: int) -> tuple[list[str], bool]:
+    """BFS a directory prefix. Returns (files, truncated)."""
     stack = [prefix if prefix.endswith("/") else prefix + "/"]
     files: list[str] = []
-    while stack and len(files) < max_files:
+    truncated = False
+    while stack:
+        if len(files) >= max_files:
+            truncated = True
+            break
         current = stack.pop()
         for entry in op.list(current):
             name = entry.path
@@ -101,7 +106,12 @@ def _walk_prefix(op, prefix: str, max_files: int) -> list[str]:
                 stack.append(name)
             else:
                 files.append(name)
-    return files[:max_files]
+                if len(files) >= max_files:
+                    truncated = True
+                    break
+        if truncated:
+            break
+    return files, truncated
 
 
 def pull_ref(store: Store, ref: ObjectRef, dest: Path, recursive: bool, max_files: int) -> list[PulledFile]:
@@ -109,8 +119,9 @@ def pull_ref(store: Store, ref: ObjectRef, dest: Path, recursive: bool, max_file
     pulled: list[PulledFile] = []
 
     keys: list[str]
+    truncated = False
     if recursive:
-        keys = _walk_prefix(op, ref.key, max_files)
+        keys, truncated = _walk_prefix(op, ref.key, max_files)
         if not keys:
             keys = [ref.key]  # maybe it's a plain object after all
     else:
@@ -118,11 +129,13 @@ def pull_ref(store: Store, ref: ObjectRef, dest: Path, recursive: bool, max_file
 
     for key in keys:
         target = _safe_local_path(dest, key)
+        if target.exists() and target.stat().st_size > 0:
+            continue  # already pulled (idempotent re-runs)
         target.parent.mkdir(parents=True, exist_ok=True)
         data = bytes(op.read(key))
         target.write_bytes(data)
         pulled.append(PulledFile(path=key, local=str(target), size=len(data)))
-    return pulled
+    return pulled, truncated
 
 
 def find_store(session: SASession, provider: str, bucket: str) -> Store | None:
@@ -208,8 +221,13 @@ def pull_message(
                 )
                 continue
             try:
-                for f in pull_ref(store, ref, dest, recursive, max_files):
-                    downloaded.append(f.local)
+                pulled, truncated = pull_ref(store, ref, dest, recursive, max_files)
+                downloaded.extend(f.local for f in pulled)
+                if truncated:
+                    skipped.append(
+                        {"provider": ref.provider, "bucket": ref.bucket,
+                         "reason": f"prefix listing truncated at {max_files} files"}
+                    )
             except StoreNotFound as e:
                 skipped.append({"provider": ref.provider, "bucket": ref.bucket, "reason": e.detail})
         return {

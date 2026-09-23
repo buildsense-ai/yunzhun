@@ -95,8 +95,10 @@ def llm_fallback_extract(message_id: int) -> list[ObjectRef]:
         )
         if msg is None or not msg.body_fetched:
             return []
-
-    text = " ".join(filter(None, [msg.subject, msg.text_body or "", msg.html_body or ""]))
+        # snapshot fields before the session closes (avoid DetachedInstanceError)
+        text = " ".join(
+            filter(None, [msg.subject, msg.text_body or "", msg.html_body or ""])
+        )
     try:
         candidates = _candidate_addresses(text, settings.llm_model, api_key)
     except Exception:  # noqa: BLE001 — fallback is best-effort
@@ -107,6 +109,8 @@ def llm_fallback_extract(message_id: int) -> list[ObjectRef]:
         msg = session.get(
             Message, message_id, options=(selectinload(Message.object_refs),)
         )
+        if msg is None:
+            return []
         existing_urls = {r.url for r in msg.object_refs}
         for address in candidates:
             ref = classify(address)
