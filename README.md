@@ -22,9 +22,9 @@ NetEase 不提供官方 REST API，第三方接入只有 IMAP/POP3/SMTP + 授权
 ## 快速开始
 
 ```bash
-pdm install
+uv sync
 cp .env.example .env        # 改 YUNZHUN_API_KEY
-pdm run uvicorn app.main:app --port 8000
+uv run uvicorn app.main:app --port 8000
 # Swagger: http://localhost:8000/docs
 ```
 
@@ -96,7 +96,7 @@ curl -X POST :8000/v1/objects/fetch -H "X-API-Key: $KEY" \
 提取只解决"找到"；要**读取私有 bucket**，用统一访问层 [Apache OpenDAL](https://opendal.apache.org/) ——
 唯一把 `oss` / `obs` / `cos` 作为一等公民服务的开源方案（Rust 内核，sync+async 双 API，50+ 后端）：
 
-OpenDAL 已是一等依赖（`pdm install` 自带），提取结果里的 region/bucket/key 直接映射：
+OpenDAL 已是一等依赖（`uv sync` 自带），提取结果里的 region/bucket/key 直接映射：
 
 ```python
 import opendal  # 提取结果里的 region/bucket/key 直接映射
