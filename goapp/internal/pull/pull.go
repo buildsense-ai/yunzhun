@@ -4,12 +4,8 @@
 package pull
 
 import (
-	"crypto/hmac"
 	"crypto/md5"
-	"crypto/sha1"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,98 +34,6 @@ func FetchURL(url string, maxBytes int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 }
 
-// ---------- Aliyun OSS SignV1 ----------
-
-type ossClient struct {
-	bucket   string
-	endpoint string // e.g. https://oss-cn-hangzhou.aliyuncs.com
-	ak, sk   string
-	http     *http.Client
-}
-
-func ossEndpoint(region string) string {
-	if region == "" {
-		region = "cn-hangzhou"
-	}
-	return fmt.Sprintf("https://%s.oss-%s.aliyuncs.com", "", region)
-}
-
-func (o *ossClient) sign(req *http.Request, resource string) {
-	date := time.Now().UTC().Format(http.TimeFormat)
-	req.Header.Set("Date", date)
-	str := req.Method + "\n\n\n" + date + "\n" + resource
-	h := hmac.New(sha1.New, []byte(o.sk))
-	h.Write([]byte(str))
-	req.Header.Set("Authorization", "OSS "+o.ak+":"+base64.StdEncoding.EncodeToString(h.Sum(nil)))
-}
-
-func (o *ossClient) Read(key string) ([]byte, error) {
-	u := fmt.Sprintf("%s/%s", o.endpoint, key)
-	req, _ := http.NewRequest("GET", u, nil)
-	o.sign(req, "/"+o.bucket+"/"+key)
-	resp, err := o.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("oss GET %s: HTTP %d %s", key, resp.StatusCode, truncate(string(b), 160))
-	}
-	return io.ReadAll(resp.Body)
-}
-
-func (o *ossClient) Stat(key string) (int64, error) {
-	u := fmt.Sprintf("%s/%s", o.endpoint, key)
-	req, _ := http.NewRequest("HEAD", u, nil)
-	o.sign(req, "/"+o.bucket+"/"+key)
-	resp, err := o.http.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return 0, fmt.Errorf("oss HEAD %s: HTTP %d", key, resp.StatusCode)
-	}
-	return resp.ContentLength, nil
-}
-
-type listResult struct {
-	Contents       []struct{ Key string `xml:"Key"` } `xml:"Contents"`
-	CommonPrefixes []struct {
-		Prefix string `xml:"Prefix"`
-	} `xml:"CommonPrefixes"`
-	IsTruncated bool   `xml:"IsTruncated"`
-	NextMarker  string `xml:"NextMarker"`
-}
-
-// List walks a prefix one level deep; returns (files, subdirs).
-func (o *ossClient) List(prefix string) (files, dirs []string, err error) {
-	u := fmt.Sprintf("%s/?prefix=%s&delimiter=/&max-keys=500", o.endpoint, prefix)
-	req, _ := http.NewRequest("GET", u, nil)
-	o.sign(req, "/"+o.bucket+"/")
-	resp, err := o.http.Do(req)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return nil, nil, fmt.Errorf("oss LIST %s: HTTP %d %s", prefix, resp.StatusCode, truncate(string(body), 160))
-	}
-	var lr listResult
-	if err := xml.Unmarshal(body, &lr); err != nil {
-		return nil, nil, err
-	}
-	for _, c := range lr.Contents {
-		files = append(files, c.Key)
-	}
-	for _, p := range lr.CommonPrefixes {
-		dirs = append(dirs, p.Prefix)
-	}
-	return files, dirs, nil
-}
-
 // ---------- unified puller ----------
 
 type Puller interface {
@@ -141,11 +45,11 @@ type Puller interface {
 func pullerFor(st *store.Store) (Puller, error) {
 	switch st.Provider {
 	case "aliyun-oss":
-		ep := st.Endpoint
-		if ep == "" {
-			ep = fmt.Sprintf("https://oss-%s.aliyuncs.com", st.Region)
-		}
-		return &ossClient{bucket: st.Bucket, endpoint: ep, ak: st.AccessKey, sk: st.SecretKey, http: httpClient}, nil
+		return newOSS(st)
+	case "tencent-cos":
+		return newCOS(st)
+	case "huawei-obs":
+		return newOBS(st)
 	default:
 		return nil, fmt.Errorf("credentialed pull for %s not wired yet (presigned https links work)", st.Provider)
 	}
