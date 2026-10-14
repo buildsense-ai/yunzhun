@@ -333,10 +333,8 @@ func containsAny(s string, subs []string) bool {
 func (a *app) view(c *ui.Context) {
 	c.SetTheme(bioTheme())
 	a.mu.RLock()
-	a.snap = a.snap // read under lock
 	snap := a.snap
 	a.mu.RUnlock()
-	a.snap = snap
 
 	ui.Column(c).Fill().Background(bgDeep).Children(func() {
 		a.header(c)
