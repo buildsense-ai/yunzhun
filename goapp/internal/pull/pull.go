@@ -50,6 +50,8 @@ func pullerFor(st *store.Store) (Puller, error) {
 		return newCOS(st)
 	case "huawei-obs":
 		return newOBS(st)
+	case "aws-s3", "s3-compatible":
+		return newS3(st)
 	default:
 		return nil, fmt.Errorf("credentialed pull for %s not wired yet (presigned https links work)", st.Provider)
 	}

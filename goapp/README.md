@@ -25,7 +25,8 @@ internal/
                            存储地址正则、邮件内 MD5 提取、UTF-7 文件夹名
   jev/                     SystemOne 判定客户端 + LLM 兜底提取
   pull/                    官方纯 Go SDK puller：OSS（aliyun-oss-go-sdk）、
-                           COS（cos-go-sdk-v5）、OBS（obs-go-sdk）；
+                           COS（cos-go-sdk-v5）、OBS（obs-go-sdk）、
+                           S3/s3-compatible（minio-go v7）；
                            预签名 URL 走 stdlib GET；原子写+校验
   pipeline/                事件驱动编排：sync → judge → gate → pull，
                            IDLE 守护 goroutine、退避重连、失败计数
@@ -40,7 +41,7 @@ internal/
 | Jev 判定 + LLM 兜底 | ✅ |
 | 置信门禁 + 原子下载 + 去重 | ✅ |
 | IDLE 推送 + 事件驱动 | ✅ goroutine |
-| 凭据化下载 | ✅ OSS/COS/OBS 官方纯 Go SDK；S3 待接（预签名 https 已可直接下） |
+| 凭据化下载 | ✅ OSS/COS/OBS/S3(minio) 官方纯 Go SDK 全覆盖 |
 | REST API / SMTP 发信 / POP3 | ❌ 桌面应用不需要（要外部接入就继续用 Python 网关） |
 
 ## 环境变量

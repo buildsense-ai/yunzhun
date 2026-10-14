@@ -7,11 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	alioss "github.com/aliyun/aliyun-oss-go-sdk/oss"
 	cos "github.com/tencentyun/cos-go-sdk-v5"
 	obs "github.com/huaweicloud/huaweicloud-sdk-go-obs/obs"
+	minio "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"goapp/internal/store"
 )
@@ -158,4 +161,61 @@ func (p *obsPuller) List(prefix string) (files, dirs []string, err error) {
 		files = append(files, o.Key)
 	}
 	return files, out.CommonPrefixes, nil
+}
+
+// ---------- AWS S3 / S3-compatible (minio) ----------
+
+type s3Puller struct {
+	c      *minio.Client
+	bucket string
+}
+
+func newS3(st *store.Store) (*s3Puller, error) {
+	ep := st.Endpoint
+	if ep == "" {
+		ep = fmt.Sprintf("s3.%s.amazonaws.com", st.Region)
+	}
+	host := strings.TrimPrefix(strings.TrimPrefix(ep, "https://"), "http://")
+	c, err := minio.New(host, &minio.Options{
+		Creds:  credentials.NewStaticV4(st.AccessKey, st.SecretKey, ""),
+		Secure: strings.HasPrefix(ep, "https") || st.Endpoint == "",
+		Region: st.Region,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &s3Puller{c, st.Bucket}, nil
+}
+
+func (p *s3Puller) Read(key string) ([]byte, error) {
+	obj, err := p.c.GetObject(context.Background(), p.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer obj.Close()
+	return io.ReadAll(obj)
+}
+
+func (p *s3Puller) Stat(key string) (int64, error) {
+	info, err := p.c.StatObject(context.Background(), p.bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		return 0, err
+	}
+	return info.Size, nil
+}
+
+func (p *s3Puller) List(prefix string) (files, dirs []string, err error) {
+	for obj := range p.c.ListObjects(context.Background(), p.bucket, minio.ListObjectsOptions{
+		Prefix: prefix, Recursive: false, MaxKeys: 500,
+	}) {
+		if obj.Err != nil {
+			return files, dirs, obj.Err
+		}
+		if strings.HasSuffix(obj.Key, "/") {
+			dirs = append(dirs, obj.Key)
+		} else {
+			files = append(files, obj.Key)
+		}
+	}
+	return files, dirs, nil
 }
