@@ -49,3 +49,10 @@ internal/
 同 Python 版：`YUNZHUN_VERCEL_GATEWAY_KEY`、`YUNZHUN_LLM_MODEL`、`YUNZHUN_DOWNLOAD_DIR`、
 `YUNZHUN_SYNC_INTERVAL_SECONDS`、`YUNZHUN_IDLE_*`、`YUNZHUN_PIPELINE_*`、`YUNZHUN_WEBHOOK_URL`、
 `YUNZHUN_DB`（默认 `yunzhun.db`）。
+
+### 下载目标（`YUNZHUN_DOWNLOAD_DIR`）
+
+- 本地路径：`./downloads`（默认）、`/Volumes/share/dir`（挂载点直接用）
+- **SMB 直写**（无需挂载）：`smb://user:pass@host/share/sub/dir`
+  ——纯 Go `go-smb2`，NTLM 认证，`.part`+rename 原子写，去重/校验/断点语义与本地一致
+  例：`YUNZHUN_DOWNLOAD_DIR=smb://nas:secret@192.168.1.10/datasets/yunzhun`

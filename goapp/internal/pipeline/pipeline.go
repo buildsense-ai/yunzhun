@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -289,17 +290,27 @@ func (e *Engine) PullMessage(msgID int64, force bool) (downloaded int, skipped [
 	if err != nil || len(refs) == 0 {
 		return 0, nil, fmt.Errorf("no storage refs")
 	}
-	done, _ := e.DB.DoneKeys(msgID)
-	dest := fmt.Sprintf("%s/msg-%d", e.Cfg.DownloadDir, msgID)
+	doneSet := map[string]bool{}
+	if keys, err := e.DB.DoneKeys(msgID); err == nil {
+		for k := range keys {
+			doneSet[k] = true
+		}
+	}
+	sink, err := pull.NewSink(e.Cfg.DownloadDir)
+	if err != nil {
+		return 0, nil, err
+	}
+	base := fmt.Sprintf("msg-%d", msgID)
 
 	for i := range refs {
 		ref := refs[i]
 		st, _ := e.DB.FindStore(ref.Provider, ref.Bucket)
-		pulled, failures, trunc := pull.PullRef(st, &ref, dest, true, 200, done)
-		for _, f := range pulled {
+		pulled, failures, trunc := pull.PullRef(st, &ref, sink, base, true, 200, doneSet)
+		for _, disp := range pulled {
+			// remote key = display path minus the sink's prefix display
 			e.DB.UpsertPullRecord(&store.PullRecord{
 				MessageID: msgID, Provider: ref.Provider, Bucket: ref.Bucket,
-				RemoteKey: remoteKeyOf(f, dest), LocalPath: f, Status: "done",
+				RemoteKey: keyFromDisp(disp, sink, base), LocalPath: disp, Status: "done",
 			})
 			downloaded++
 		}
@@ -321,11 +332,15 @@ func (e *Engine) PullMessage(msgID int64, force bool) (downloaded int, skipped [
 	return downloaded, skipped, nil
 }
 
-func remoteKeyOf(localPath, dest string) string {
-	if i := strings.Index(localPath, dest+"/"); i >= 0 {
-		return localPath[len(dest)+1:]
+// keyFromDisp recovers the remote key from a display path produced by the sink.
+// Local displays are absolute paths; smb displays are smb:// URLs — in both
+// cases the remote key is everything after "msg-<id>/".
+func keyFromDisp(disp string, sink pull.Sink, base string) string {
+	marker := base + "/"
+	if i := strings.Index(disp, marker); i >= 0 {
+		return disp[i+len(marker):]
 	}
-	return localPath
+	return filepath.Base(disp)
 }
 
 // ---------- orchestration ----------
