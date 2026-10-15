@@ -70,7 +70,7 @@ OpenRouter 实测可用（deepseek-chat-v3-0324，单次判定 ~$0.0002）：
 YUNZHUN_JEV_PROVIDER=llm
 YUNZHUN_LLM_URL=https://openrouter.ai/api/v1/chat/completions
 YUNZHUN_LLM_KEY=sk-or-v1-...
-YUNZHUN_LLM_MODEL=deepseek/deepseek-chat-v3-0324
+YUNZHUN_LLM_MODEL=deepseek/deepseek-v4.1-flash
 ```
 
 `llm` provider 同时承担判定（四问 JSON 输出）和 LLM 兜底地址提取。

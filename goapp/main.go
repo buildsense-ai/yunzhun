@@ -446,7 +446,7 @@ func (a *app) settingsPanel(c *ui.Context) {
 				ui.Text(c, "LLM 通道（provider=llm，兼兜底提取）").FontSize(10).Bold().TextColor(t.Accent)
 				field("llm url", "llm_url", "openrouter.ai/api/v1/chat/completions")
 				field("llm key", "llm_key", "sk-or-v1-...")
-				field("llm model", "llm_model", "deepseek/deepseek-chat-v3-0324")
+				field("llm model", "llm_model", "deepseek/deepseek-v4.1-flash")
 				ui.Text(c, "落盘与调度").FontSize(10).Bold().TextColor(t.Accent)
 				field("下载目录", "download_dir", "./downloads 或 smb://u:p@host/share/dir")
 				field("webhook", "webhook_url", "拉取成功 POST 通知（可空）")
