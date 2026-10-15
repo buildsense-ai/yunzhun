@@ -50,10 +50,7 @@ type Settings struct {
 }
 
 func env(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
+	return envOrBundled(k, def)
 }
 
 func envDur(k string, def time.Duration) time.Duration {
