@@ -50,6 +50,25 @@ internal/
 `YUNZHUN_SYNC_INTERVAL_SECONDS`、`YUNZHUN_IDLE_*`、`YUNZHUN_PIPELINE_*`、`YUNZHUN_WEBHOOK_URL`、
 `YUNZHUN_DB`（默认 `yunzhun.db`）。
 
+### 判定后端（三选一）
+
+| provider | 配置 | 现状 |
+|---|---|---|
+| `vercel`（typesafe/jev） | `YUNZHUN_VERCEL_GATEWAY_KEY` | ⚠️ 免费层已收紧（403） |
+| `typesafe` 直连 | `YUNZHUN_JEV_API_KEY` | ⚠️ 区域封锁（451） |
+| **`llm`（OpenAI 兼容）** | `YUNZHUN_JEV_PROVIDER=llm` + `YUNZHUN_LLM_URL`/`YUNZHUN_LLM_KEY`/`YUNZHUN_LLM_MODEL` | ✅ 推荐 |
+
+OpenRouter 实测可用（deepseek-chat-v3-0324，单次判定 ~$0.0002）：
+
+```bash
+YUNZHUN_JEV_PROVIDER=llm
+YUNZHUN_LLM_URL=https://openrouter.ai/api/v1/chat/completions
+YUNZHUN_LLM_KEY=sk-or-v1-...
+YUNZHUN_LLM_MODEL=deepseek/deepseek-chat-v3-0324
+```
+
+`llm` provider 同时承担判定（四问 JSON 输出）和 LLM 兜底地址提取。
+
 ### 归档命名规范（自动）
 
 拉取落盘按实验室规范组织：`<YYYY-M-D>/<组学目录>/<远端key>`

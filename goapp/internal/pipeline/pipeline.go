@@ -20,10 +20,14 @@ import (
 	"goapp/internal/store"
 )
 
+type judger interface {
+	Judge(state string) (*jev.Answers, error)
+}
+
 type Engine struct {
 	DB       *store.DB
 	Cfg      config.Settings
-	jev      *jev.Client
+	jev      judger
 	llm      *jev.LLM
 	failures map[int64]int
 	mu       sync.Mutex
@@ -33,11 +37,22 @@ type Engine struct {
 
 func New(db *store.DB, cfg config.Settings) *Engine {
 	e := &Engine{DB: db, Cfg: cfg, failures: map[int64]int{}}
-	if cfg.JevAPIKey != "" {
-		e.jev = jev.New(cfg.JevURL, cfg.JevModel, cfg.JevAPIKey)
-	}
 	if cfg.LLMModel != "" && cfg.LLMKey != "" {
 		e.llm = jev.NewLLM(cfg.LLMURL, cfg.LLMModel, cfg.LLMKey)
+	}
+	switch cfg.JevProvider {
+	case "llm":
+		if e.llm != nil {
+			e.jev = e.llm
+		}
+	default: // vercel | typesafe
+		if cfg.JevAPIKey != "" {
+			e.jev = jev.New(cfg.JevURL, cfg.JevModel, cfg.JevAPIKey)
+		}
+	}
+	// auto-fallback: no working jev key but an llm channel exists -> judge via LLM
+	if e.jev == nil && e.llm != nil {
+		e.jev = e.llm
 	}
 	return e
 }
@@ -204,7 +219,7 @@ func (e *Engine) extractAndStore(m *store.Message) {
 
 func (e *Engine) Judge(msgID int64) (*store.Judgment, error) {
 	if e.jev == nil {
-		return nil, fmt.Errorf("jev not configured (set YUNZHUN_VERCEL_GATEWAY_KEY)")
+		return nil, fmt.Errorf("no judgment provider configured")
 	}
 	m, err := e.EnsureBody(msgID)
 	if err != nil {

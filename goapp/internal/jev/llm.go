@@ -24,15 +24,7 @@ func NewLLM(url, model, key string) *LLM {
 const extractPrompt = `You extract file-storage addresses from email text. Respond with JSON only: {"addresses": ["<full address>"]}. Normalize prose-form storage descriptions (e.g. 'bucket: foo, prefix: bar/x') into proper URIs (oss://bucket/key, obs://bucket/key, cos://bucket/key, s3://bucket/key, or https:// URLs). Only include real storage/download addresses; never ordinary web links.`
 
 // ExtractAddresses asks the LLM to normalize prose-form addresses into URIs.
-func (l *LLM) ExtractAddresses(text string) ([]string, error) {
-	payload := map[string]any{
-		"model": l.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": extractPrompt},
-			{"role": "user", "content": truncate(text, 6000)},
-		},
-		"response_format": map[string]string{"type": "json_object"},
-	}
+func (l *LLM) post(payload map[string]any) ([]byte, error) {
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", l.URL, bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+l.Key)
@@ -45,6 +37,21 @@ func (l *LLM) ExtractAddresses(text string) ([]string, error) {
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("llm HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
+	}
+	return raw, nil
+}
+
+func (l *LLM) ExtractAddresses(text string) ([]string, error) {
+	raw, err := l.post(map[string]any{
+		"model": l.Model,
+		"messages": []map[string]string{
+			{"role": "system", "content": extractPrompt},
+			{"role": "user", "content": truncate(text, 6000)},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+	})
+	if err != nil {
+		return nil, err
 	}
 	var out struct {
 		Choices []struct {

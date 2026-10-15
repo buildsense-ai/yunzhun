@@ -100,7 +100,7 @@ func Load() Settings {
 		}
 		s.JevAPIKey = gwKey
 	}
-	s.LLMURL = "https://ai-gateway.vercel.app/v1/chat/completions"
-	s.LLMKey = env("YUNZHUN_LLM_API_KEY", gwKey)
+	s.LLMURL = env("YUNZHUN_LLM_URL", "https://ai-gateway.vercel.app/v1/chat/completions")
+	s.LLMKey = env("YUNZHUN_LLM_KEY", env("YUNZHUN_LLM_API_KEY", gwKey))
 	return s
 }
