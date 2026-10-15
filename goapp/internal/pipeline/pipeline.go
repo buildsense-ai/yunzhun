@@ -232,7 +232,8 @@ func (e *Engine) Judge(msgID int64) (*store.Judgment, error) {
 	}
 	j := &store.Judgment{
 		MessageID: m.ID, Category: ans.Category, CategoryConf: ans.CategoryConf,
-		StorageDelivery: ans.StorageDelivery, ActionRequired: ans.ActionRequired, Model: ans.Model,
+		StorageDelivery: ans.StorageDelivery, ActionRequired: ans.ActionRequired,
+		Assay: ans.Assay, AssayConf: ans.AssayConf, Model: ans.Model,
 	}
 	if err := e.DB.SaveJudgment(j); err != nil {
 		return nil, err
@@ -310,8 +311,11 @@ func (e *Engine) PullMessage(msgID int64, force bool) (downloaded int, skipped [
 			date = m.Date
 		}
 	}
+	// Jev's semantic verdict first; keyword classifier as fallback
 	assay := "other"
-	if m != nil {
+	if j != nil && j.Assay != "" && j.Assay != "other" {
+		assay = j.Assay
+	} else if m != nil {
 		assay = mailx.AssayDir(m.Subject, m.TextBody)
 	}
 	base := fmt.Sprintf("%s/%s", date.Format("2006-1-2"), assay)

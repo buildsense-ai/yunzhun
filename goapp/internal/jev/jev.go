@@ -32,11 +32,25 @@ var categories = map[string]string{
 
 var actionLevels = []string{"无需任何行动", "可稍后处理（参阅/归档即可）", "需要尽快关注或处理"}
 
+// assay types per the lab archive convention
+var assayTypes = map[string]string{
+	"10X":         "10x Genomics 转录组（scRNA-seq、Chromium）",
+	"huada":       "华大/BGI 转录组（DNBSEQ）",
+	"vdj":         "免疫组库（VDJ、TCR、BCR）",
+	"ATAC":        "ATAC-seq 染色质可及性",
+	"demultiplex": "demultiplex 拆分结果",
+	"10X空转":      "10x 空间转录组（Visium）",
+	"华大空转":      "华大/BGI 空间转录组（Stereo-seq）",
+	"other":       "无法判断或非测序交付",
+}
+
 type Answers struct {
 	Category        string
 	CategoryConf    float64
 	StorageDelivery float64
 	ActionRequired  int
+	Assay           string
+	AssayConf       float64
 	Model           string
 }
 
@@ -55,6 +69,9 @@ func (c *Client) Judge(state string) (*Answers, error) {
 			},
 			"action_required": map[string]any{
 				"type": "score", "instructions": "收件人需要采取行动的紧迫程度", "criteria": actionLevels,
+			},
+			"assay": map[string]any{
+				"type": "choice", "instructions": "这封邮件交付的数据属于哪种组学类型？", "criteria": assayTypes,
 			},
 		},
 	}
@@ -88,6 +105,8 @@ func (c *Client) Judge(state string) (*Answers, error) {
 	a.CategoryConf = out.Answers["category"].Confidence
 	a.StorageDelivery = out.Answers["storage_delivery"].Noul
 	a.ActionRequired = int(out.Answers["action_required"].Score + 0.5)
+	a.Assay = out.Answers["assay"].Choice
+	a.AssayConf = out.Answers["assay"].Confidence
 	return a, nil
 }
 

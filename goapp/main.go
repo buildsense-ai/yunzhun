@@ -42,6 +42,7 @@ type card struct {
 	From      string
 	Delivery  float64
 	Category  string
+	Assay     string
 	Providers []string
 	Done      int
 	Failed    int
@@ -88,7 +89,7 @@ func (a *app) refresh() {
 	db := a.eng.DB
 	rows, err := db.Query(`
 		SELECT m.id, m.subject, m.from_addr, m.internal_date,
-		       j.category, j.storage_delivery,
+		       j.category, j.storage_delivery, j.assay,
 		       (SELECT COUNT(*) FROM pull_records p WHERE p.message_id=m.id AND p.status='done'),
 		       (SELECT COUNT(*) FROM pull_records p WHERE p.message_id=m.id AND p.status='failed'),
 		       (SELECT COALESCE(SUM(p.size),0) FROM pull_records p WHERE p.message_id=m.id AND p.status='done')
@@ -111,15 +112,16 @@ func (a *app) refresh() {
 	snap := snapshot{}
 	for rows.Next() {
 		var c card
-		var cat sql.NullString
+		var cat, assay sql.NullString
 		var del sql.NullFloat64
 		var idate sql.NullTime
-		rows.Scan(&c.MsgID, &c.Subject, &c.From, &idate, &cat, &del, &c.Done, &c.Failed, &c.Bytes)
+		rows.Scan(&c.MsgID, &c.Subject, &c.From, &idate, &cat, &del, &assay, &c.Done, &c.Failed, &c.Bytes)
 		c.Category = cat.String
 		c.Delivery = del.Float64
+		c.Assay = assay.String
 		var j *store.Judgment
 		if cat.Valid {
-			j = &store.Judgment{Category: c.Category, StorageDelivery: c.Delivery}
+			j = &store.Judgment{Category: c.Category, StorageDelivery: c.Delivery, Assay: c.Assay}
 		}
 		st := stage(store.Message{}, j, c.Done, c.Failed)
 		refs, _ := db.Refs(c.MsgID)
@@ -192,6 +194,10 @@ func (a *app) cardView(c *ui.Context, col column, cd card) {
 			if cd.Delivery > 0 {
 				ui.Textf(c, "交付 %.0f%%", cd.Delivery*100).FontSize(9).TextColor(inkDim)
 			}
+			if cd.Assay != "" && cd.Assay != "other" {
+				ui.Text(c, cd.Assay).FontSize(9).TextColor(cLime).Padding(2).
+					Background(bgDeep).Radius(4)
+			}
 			if cd.Done > 0 {
 				ui.Textf(c, "%d✓", cd.Done).FontSize(9).TextColor(cEmerald)
 			}
@@ -248,7 +254,7 @@ func (a *app) drawer(c *ui.Context) {
 			}
 		})
 		ui.Text(c, cd.From).FontSize(11).TextColor(inkDim)
-		ui.Textf(c, "类别 %s · 交付概率 %.1f%%", cd.Category, cd.Delivery*100).FontSize(11).TextColor(cTeal)
+		ui.Textf(c, "类别 %s · 交付 %.1f%% · 组学 %s", cd.Category, cd.Delivery*100, cd.Assay).FontSize(11).TextColor(cTeal)
 		ui.Text(c, "存储引用").FontSize(10).Bold().TextColor(inkDim)
 		refs, _ := a.eng.DB.Refs(cd.MsgID)
 		for _, r := range refs {

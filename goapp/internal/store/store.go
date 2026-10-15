@@ -68,6 +68,8 @@ type Judgment struct {
 	CategoryConf    float64
 	StorageDelivery float64
 	ActionRequired  int
+	Assay           string
+	AssayConf       float64
 	Model           string
 }
 
@@ -190,6 +192,15 @@ CREATE TABLE IF NOT EXISTS pull_records(
 CREATE INDEX IF NOT EXISTS ix_messages_folder ON messages(folder_id, uid);
 CREATE INDEX IF NOT EXISTS ix_refs_msg ON object_refs(message_id);
 CREATE INDEX IF NOT EXISTS ix_pulls_msg ON pull_records(message_id);`)
+	if err == nil {
+		// lightweight column migrations
+		for _, ddl := range []string{
+			`ALTER TABLE judgments ADD COLUMN assay TEXT DEFAULT ''`,
+			`ALTER TABLE judgments ADD COLUMN assay_conf REAL DEFAULT 0`,
+		} {
+			d.Exec(ddl) // ignore "duplicate column" errors
+		}
+	}
 	return err
 }
 
@@ -359,18 +370,20 @@ func (d *DB) Refs(messageID int64) ([]ObjectRef, error) {
 }
 
 func (d *DB) SaveJudgment(j *Judgment) error {
-	_, err := d.Exec(`INSERT INTO judgments(message_id,category,category_conf,storage_delivery,action_required,model)
-		VALUES(?,?,?,?,?,?)
+	_, err := d.Exec(`INSERT INTO judgments(message_id,category,category_conf,storage_delivery,action_required,assay,assay_conf,model)
+		VALUES(?,?,?,?,?,?,?,?)
 		ON CONFLICT(message_id) DO UPDATE SET category=excluded.category, category_conf=excluded.category_conf,
-		storage_delivery=excluded.storage_delivery, action_required=excluded.action_required, model=excluded.model`,
-		j.MessageID, j.Category, j.CategoryConf, j.StorageDelivery, j.ActionRequired, j.Model)
+		storage_delivery=excluded.storage_delivery, action_required=excluded.action_required,
+		assay=excluded.assay, assay_conf=excluded.assay_conf, model=excluded.model`,
+		j.MessageID, j.Category, j.CategoryConf, j.StorageDelivery, j.ActionRequired,
+		j.Assay, j.AssayConf, j.Model)
 	return err
 }
 
 func (d *DB) Judgment(messageID int64) (*Judgment, error) {
 	var j Judgment
-	err := d.QueryRow(`SELECT message_id,category,category_conf,storage_delivery,action_required,model FROM judgments WHERE message_id=?`,
-		messageID).Scan(&j.MessageID, &j.Category, &j.CategoryConf, &j.StorageDelivery, &j.ActionRequired, &j.Model)
+	err := d.QueryRow(`SELECT message_id,category,category_conf,storage_delivery,action_required,COALESCE(assay,''),COALESCE(assay_conf,0),model FROM judgments WHERE message_id=?`,
+		messageID).Scan(&j.MessageID, &j.Category, &j.CategoryConf, &j.StorageDelivery, &j.ActionRequired, &j.Assay, &j.AssayConf, &j.Model)
 	return &j, err
 }
 

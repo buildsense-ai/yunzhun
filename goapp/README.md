@@ -66,7 +66,9 @@ downloads/2026-9-28/
   other/        未匹配
 ```
 
-类型从邮件主题+正文自动判（关键词匹配，空转优先于转录组判）；
+类型判定是双层的：**Jev 语义判（主）**——批量提问里第 4 问 `assay`
+（8 选项含置信度，能认 "scRNA-seq"/"Chromium"/"Stereo-seq" 等变体写法），
+**关键词匹配（兜底）**——Jev 说 other 或未配置时用 `mailx.AssayDir`。
 日期取邮件 INTERNALDATE。`script/` 目录留给脚本，不走邮件管道。
 
 ### 下载目标（`YUNZHUN_DOWNLOAD_DIR`）
