@@ -191,6 +191,9 @@ CREATE TABLE IF NOT EXISTS pull_records(
   UNIQUE(message_id, remote_key));
 CREATE INDEX IF NOT EXISTS ix_messages_folder ON messages(folder_id, uid);
 CREATE INDEX IF NOT EXISTS ix_refs_msg ON object_refs(message_id);
+CREATE TABLE IF NOT EXISTS settings(
+  key TEXT PRIMARY KEY,
+  value TEXT DEFAULT '');
 CREATE INDEX IF NOT EXISTS ix_pulls_msg ON pull_records(message_id);`)
 	if err == nil {
 		// lightweight column migrations
@@ -435,6 +438,33 @@ func (d *DB) DoneKeys(messageID int64) (map[string]string, error) {
 		var k, p string
 		rows.Scan(&k, &p)
 		out[k] = p
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) GetSetting(key string) string {
+	var v string
+	d.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&v)
+	return v
+}
+
+func (d *DB) SetSetting(key, value string) error {
+	_, err := d.Exec(`INSERT INTO settings(key,value) VALUES(?,?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
+}
+
+func (d *DB) AllSettings() (map[string]string, error) {
+	rows, err := d.Query(`SELECT key,value FROM settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		rows.Scan(&k, &v)
+		out[k] = v
 	}
 	return out, rows.Err()
 }

@@ -50,6 +50,12 @@ internal/
 `YUNZHUN_SYNC_INTERVAL_SECONDS`、`YUNZHUN_IDLE_*`、`YUNZHUN_PIPELINE_*`、`YUNZHUN_WEBHOOK_URL`、
 `YUNZHUN_DB`（默认 `yunzhun.db`）。
 
+### 应用内设置（⚙ 面板）
+
+顶栏 ⚙ 打开设置：provider / keys / llm url+model / 下载目录(含 smb://) /
+webhook / 同步周期 / pipeline 周期 / IDLE 开关。保存在 sqlite `settings`
+表，**立即生效**（判定客户端重建、后台循环重启）；DB 值覆盖 env 默认。
+
 ### 判定后端（三选一）
 
 | provider | 配置 | 现状 |

@@ -67,6 +67,9 @@ type app struct {
 	addr string
 	code string
 	msg  string
+	// settings panel
+	showSettings bool
+	f            map[string]*string  // field ptrs for the settings form
 }
 
 func stage(m store.Message, j *store.Judgment, done, failed int) string {
@@ -174,6 +177,9 @@ func (a *app) header(c *ui.Context) {
 			ui.Textf(c, "失败 %d", s.filesErr).FontSize(12).TextColor(cRose)
 		}
 		ui.Textf(c, "%s", fmtBytes(s.bytes)).FontSize(12).TextColor(inkDim)
+		if ui.Button(c, "⚙").Clicked() {
+			a.showSettings = !a.showSettings
+		}
 	})
 }
 
@@ -336,6 +342,60 @@ func containsAny(s string, subs []string) bool {
 	return false
 }
 
+func (a *app) settingsPanel(c *ui.Context) {
+	if a.f == nil {
+		a.f = map[string]*string{}
+		eff := a.eng.EffectiveSettings()
+		for _, k := range pipeline.SettingKeys {
+			v := new(string)
+			*v = eff[k]
+			if k == "jev_key" && *v == "" {
+				*v = a.eng.Cfg.JevAPIKey
+			}
+			if k == "llm_key" && *v == "" {
+				*v = a.eng.Cfg.LLMKey
+			}
+			a.f[k] = v
+		}
+	}
+	field := func(label, key, placeholder string) {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, label).FontSize(11).TextColor(inkDim).Width(120)
+			ui.TextInput(c, a.f[key]).Placeholder(placeholder).Grow(1)
+		})
+	}
+	ui.Column(c).Fill().Padding(12).Gap(6).Background(bgPanel).Border(1, edge).Children(func() {
+		ui.Text(c, "判定后端").FontSize(11).Bold().TextColor(cLime)
+		field("provider", "jev_provider", "vercel | typesafe | llm")
+		field("jev key", "jev_key", "vck_... 或 TYPESAFE key")
+		ui.Text(c, "LLM 通道（provider=llm 时使用，同时做兜底提取）").FontSize(10).TextColor(inkDim)
+		field("llm url", "llm_url", "https://openrouter.ai/api/v1/chat/completions")
+		field("llm key", "llm_key", "sk-or-v1-...")
+		field("llm model", "llm_model", "deepseek/deepseek-chat-v3-0324")
+		ui.Text(c, "落盘与调度").FontSize(11).Bold().TextColor(cLime)
+		field("下载目录", "download_dir", "./downloads 或 smb://user:pass@host/share/dir")
+		field("webhook", "webhook_url", "拉取成功 POST 通知（可空）")
+		field("同步周期(s)", "sync_interval", "120")
+		field("pipeline(s)", "pipeline_interval", "60")
+		field("IDLE", "idle_enabled", "true/false")
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			if ui.PrimaryButton(c, "保存并生效").Clicked() {
+				kv := map[string]string{}
+				for _, k := range pipeline.SettingKeys {
+					if p := a.f[k]; p != nil {
+						kv[k] = *p
+					}
+				}
+				a.eng.SaveSettings(kv)
+				a.msg = "配置已保存并生效"
+			}
+			if a.msg != "" {
+				ui.Text(c, a.msg).FontSize(10).TextColor(cAmber)
+			}
+		})
+	})
+}
+
 func (a *app) view(c *ui.Context) {
 	c.SetTheme(bioTheme())
 	a.mu.RLock()
@@ -345,6 +405,9 @@ func (a *app) view(c *ui.Context) {
 	ui.Column(c).Fill().Background(bgDeep).Children(func() {
 		a.header(c)
 		a.accountBar(c)
+		if a.showSettings {
+			a.settingsPanel(c)
+		}
 		ui.Row(c).Grow(1).Children(func() {
 			ui.ScrollHorizontal(c).Grow(1).Padding(16).Children(func() {
 				ui.Row(c).Gap(12).AlignItems(ui.Start).Children(func() {
@@ -378,7 +441,7 @@ func main() {
 	a := &app{eng: eng}
 	a.refresh()
 
-	stop := make(chan struct{})
+	stop := make(chan struct{}) // kept for app lifetime
 	var win *mygo.Window
 	eng.OnChange = func() {
 		a.refresh()
@@ -386,7 +449,7 @@ func main() {
 			win.Invalidate()
 		}
 	}
-	eng.RunLoops(stop)
+	eng.RunLoops(nil)
 
 	mygo.App.WhenReady(func() {
 		win = mygo.NewWindow(mygo.WindowOptions{

@@ -33,28 +33,114 @@ type Engine struct {
 	mu       sync.Mutex
 	// OnChange fires after state changes (new mail, judgment, pull) — UI hook.
 	OnChange func()
+	stopCh chan struct{}
+}
+
+// SettingKeys: app-level configurable settings (DB overrides env defaults).
+var SettingKeys = []string{
+	"jev_provider", "jev_url", "jev_model", "jev_key",
+	"llm_url", "llm_model", "llm_key",
+	"download_dir", "webhook_url",
+	"sync_interval", "pipeline_interval", "pipeline_batch",
+	"idle_enabled", "idle_folder",
 }
 
 func New(db *store.DB, cfg config.Settings) *Engine {
-	e := &Engine{DB: db, Cfg: cfg, failures: map[int64]int{}}
-	if cfg.LLMModel != "" && cfg.LLMKey != "" {
-		e.llm = jev.NewLLM(cfg.LLMURL, cfg.LLMModel, cfg.LLMKey)
+	e := &Engine{DB: db, Cfg: cfg, failures: map[int64]int{}, stopCh: make(chan struct{})}
+	e.applyDbOverrides()
+	e.buildClients()
+	return e
+}
+// applyDbOverrides: DB settings beat env defaults.
+func (e *Engine) applyDbOverrides() {
+	kv, err := e.DB.AllSettings()
+	if err != nil {
+		return
 	}
-	switch cfg.JevProvider {
+	e.ApplyMap(kv)
+}
+
+// ApplyMap merges a settings map into the live config (no persistence here).
+func (e *Engine) ApplyMap(kv map[string]string) {
+	c := &e.Cfg
+	if v := kv["jev_provider"]; v != "" { c.JevProvider = v }
+	if v := kv["jev_url"]; v != "" { c.JevURL = v }
+	if v := kv["jev_model"]; v != "" { c.JevModel = v }
+	if v := kv["jev_key"]; v != "" { c.JevAPIKey = v }
+	if v := kv["llm_url"]; v != "" { c.LLMURL = v }
+	if v := kv["llm_model"]; v != "" { c.LLMModel = v }
+	if v := kv["llm_key"]; v != "" { c.LLMKey = v }
+	if v := kv["download_dir"]; v != "" { c.DownloadDir = v }
+	if v := kv["webhook_url"]; v != "" { c.WebhookURL = v }
+	if v := kv["idle_folder"]; v != "" { c.IdleFolder = v }
+	if v := kv["idle_enabled"]; v != "" { c.IdleEnabled = v == "true" }
+	if n := atoi(kv["sync_interval"]); n > 0 { c.SyncInterval = time.Duration(n) * time.Second }
+	if n := atoi(kv["pipeline_interval"]); n > 0 { c.PipelineInterval = time.Duration(n) * time.Second }
+	if n := atoi(kv["pipeline_batch"]); n > 0 { c.PipelineBatch = n }
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, ch := range s {
+		if ch < '0' || ch > '9' { return 0 }
+		n = n*10 + int(ch-'0')
+	}
+	return n
+}
+
+func (e *Engine) buildClients() {
+	if e.Cfg.LLMModel != "" && e.Cfg.LLMKey != "" {
+		e.llm = jev.NewLLM(e.Cfg.LLMURL, e.Cfg.LLMModel, e.Cfg.LLMKey)
+	}
+	switch e.Cfg.JevProvider {
 	case "llm":
 		if e.llm != nil {
 			e.jev = e.llm
 		}
 	default: // vercel | typesafe
-		if cfg.JevAPIKey != "" {
-			e.jev = jev.New(cfg.JevURL, cfg.JevModel, cfg.JevAPIKey)
+		if e.Cfg.JevAPIKey != "" {
+			e.jev = jev.New(e.Cfg.JevURL, e.Cfg.JevModel, e.Cfg.JevAPIKey)
 		}
 	}
 	// auto-fallback: no working jev key but an llm channel exists -> judge via LLM
 	if e.jev == nil && e.llm != nil {
 		e.jev = e.llm
 	}
-	return e
+}
+
+// EffectiveSettings: current values for the settings form (secrets masked as saved marker).
+func (e *Engine) EffectiveSettings() map[string]string {
+	c := e.Cfg
+	return map[string]string{
+		"jev_provider": c.JevProvider, "jev_url": c.JevURL, "jev_model": c.JevModel,
+		"llm_url": c.LLMURL, "llm_model": c.LLMModel,
+		"download_dir": c.DownloadDir, "webhook_url": c.WebhookURL,
+		"idle_folder": c.IdleFolder, "idle_enabled": boolStr(c.IdleEnabled),
+		"sync_interval": itoa(int(c.SyncInterval / time.Second)),
+		"pipeline_interval": itoa(int(c.PipelineInterval / time.Second)),
+		"pipeline_batch": itoa(c.PipelineBatch),
+	}
+}
+
+// SaveSettings persists kv and applies immediately (clients rebuilt, loops restarted).
+func (e *Engine) SaveSettings(kv map[string]string) {
+	for _, k := range SettingKeys {
+		if v, ok := kv[k]; ok {
+			e.DB.SetSetting(k, v)
+		}
+	}
+	e.ApplyMap(kv)
+	e.buildClients()
+	e.RestartLoops()
+}
+
+func boolStr(b bool) string { if b { return "true" }; return "false" }
+func itoa(n int) string {
+	if n == 0 { return "0" }
+	var b [12]byte
+	i := len(b)
+	for n > 0 { i--; b[i] = byte('0' + n%10); n /= 10 }
+	return string(b[i:])
 }
 
 func (e *Engine) changed() {
@@ -439,12 +525,16 @@ func (e *Engine) notifyWebhook() {
 // ---------- background loops ----------
 
 func (e *Engine) RunLoops(stop <-chan struct{}) {
+	e.mu.Lock()
+	e.stopCh = make(chan struct{})
+	st := e.stopCh
+	e.mu.Unlock()
 	go func() { // pipeline sweeper
 		t := time.NewTicker(e.Cfg.PipelineInterval)
 		defer t.Stop()
 		for {
 			select {
-			case <-stop:
+			case <-st:
 				return
 			case <-t.C:
 				e.ProcessPending()
@@ -456,7 +546,7 @@ func (e *Engine) RunLoops(stop <-chan struct{}) {
 		defer t.Stop()
 		for {
 			select {
-			case <-stop:
+			case <-st:
 				return
 			case <-t.C:
 				if n := e.SyncAll(); n > 0 {
@@ -466,8 +556,19 @@ func (e *Engine) RunLoops(stop <-chan struct{}) {
 		}
 	}()
 	if e.Cfg.IdleEnabled {
-		go e.idleSupervisor(stop)
+		go e.idleSupervisor(st)
 	}
+}
+
+// RestartLoops stops the current background loops and starts fresh ones,
+// picking up interval/provider changes.
+func (e *Engine) RestartLoops() {
+	e.mu.Lock()
+	if e.stopCh != nil {
+		close(e.stopCh)
+	}
+	e.mu.Unlock()
+	e.RunLoops(nil)
 }
 
 func (e *Engine) idleSupervisor(stop <-chan struct{}) {
