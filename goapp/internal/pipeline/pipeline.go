@@ -300,7 +300,21 @@ func (e *Engine) PullMessage(msgID int64, force bool) (downloaded int, skipped [
 	if err != nil {
 		return 0, nil, err
 	}
-	base := fmt.Sprintf("msg-%d", msgID)
+	// lab naming convention: <YYYY-M-D>/<assay-dir>/  (e.g. 2026-9-28/10X/)
+	m, _ := e.DB.Message(msgID)
+	date := time.Now()
+	if m != nil {
+		if !m.InternalDate.IsZero() {
+			date = m.InternalDate
+		} else if !m.Date.IsZero() {
+			date = m.Date
+		}
+	}
+	assay := "other"
+	if m != nil {
+		assay = mailx.AssayDir(m.Subject, m.TextBody)
+	}
+	base := fmt.Sprintf("%s/%s", date.Format("2006-1-2"), assay)
 
 	for i := range refs {
 		ref := refs[i]

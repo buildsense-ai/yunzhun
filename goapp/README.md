@@ -50,6 +50,25 @@ internal/
 `YUNZHUN_SYNC_INTERVAL_SECONDS`、`YUNZHUN_IDLE_*`、`YUNZHUN_PIPELINE_*`、`YUNZHUN_WEBHOOK_URL`、
 `YUNZHUN_DB`（默认 `yunzhun.db`）。
 
+### 归档命名规范（自动）
+
+拉取落盘按实验室规范组织：`<YYYY-M-D>/<组学目录>/<远端key>`
+
+```
+downloads/2026-9-28/
+  10X/          10x转录组
+  huada/        华大转录组
+  vdj/          免疫组
+  ATAC/         ATAC
+  demultiplex/  demultiplex 拆分
+  10X空转/      10X 空间转录
+  华大空转/      华大空间转录
+  other/        未匹配
+```
+
+类型从邮件主题+正文自动判（关键词匹配，空转优先于转录组判）；
+日期取邮件 INTERNALDATE。`script/` 目录留给脚本，不走邮件管道。
+
 ### 下载目标（`YUNZHUN_DOWNLOAD_DIR`）
 
 - 本地路径：`./downloads`（默认）、`/Volumes/share/dir`（挂载点直接用）
