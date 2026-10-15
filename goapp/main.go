@@ -677,8 +677,8 @@ func (a *app) ready() {
 	}
 	a.panel = mygo.NewWindow(mygo.WindowOptions{
 		Title:             "Yunzhun",
-		Width:             400,
-		Height:            520,
+		Width:             360,
+		Height:            460,
 		Hidden:            true,
 		Frameless:         true,
 		DisableResize:     true,
@@ -699,10 +699,10 @@ func (a *app) ready() {
 
 	a.win = mygo.NewWindow(mygo.WindowOptions{
 		Title:    "Yunzhun · 上游数据看板",
-		Width:    1120,
-		Height:   720,
-		MinWidth: 860,
-		MinHeight: 540,
+		Width:    960,
+		Height:   620,
+		MinWidth: 760,
+		MinHeight: 480,
 		Hidden:   true,
 		StateKey: "board",
 		Content:  ui.View(a.view),
